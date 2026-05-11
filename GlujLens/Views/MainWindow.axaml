@@ -1,0 +1,130 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+         xmlns:vm="using:GlujLens.ViewModels"
+        x:Class="GlujLens.Views.MainWindow"
+        mc:Ignorable="d"
+        Width="1200"
+        Height="800"
+        MinWidth="800"
+        MinHeight="500"
+        Title="GlujLens - Screenshot Utility"
+        WindowStartupLocation="CenterScreen">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <Design.Resources>
+        <!-- Placeholder styles for design-time -->
+    </Design.Resources>
+
+    <Grid RowDefinitions="Auto, *, Auto">
+        <!-- Top Toolbar -->
+        <Panel Grid.Row="0">
+            <StackPanel Orientation="Horizontal" Spacing="10" Margin="10">
+                <Button Content="📷 Capture Screen" 
+                        Command="{Binding CaptureCommand}"
+                        Classes="accent"
+                        MinWidth="140"/>
+                <Button Content="📋 Copy to Clipboard" 
+                        Command="{Binding CopyToClipboardCommand}"
+                        MinWidth="150"/>
+                <Button Content="💾 Save Image" 
+                        Command="{Binding SaveImageCommand}"
+                        MinWidth="120"/>
+                <Button Content="🧹 Clear Results" 
+                        Command="{Binding ClearResultsCommand}"/>
+                <Button Content="⚙️ Settings" 
+                        Command="{Binding OpenSettingsCommand}"/>
+            </StackPanel>
+        </Panel>
+
+        <!-- Main Content Area - Split into Capture Preview and AI Results -->
+        <Grid Grid.Row="1" ColumnDefinitions="*, 400">
+            <!-- Left: Screenshot Preview / Capture Area -->
+            <Border Grid.Column="0" 
+                    Margin="10" 
+                    Background="{DynamicResource SystemControlPageBackgroundAltBrush}"
+                    CornerRadius="8"
+                    BorderBrush="{DynamicResource SystemControlForegroundMediumBrush}"
+                    BorderThickness="1">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="Screenshot Preview" 
+                               FontSize="24" 
+                               Foreground="{DynamicResource SystemControlBaseHighBrush}"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,20"/>
+                    <TextBlock Text="Click 'Capture Screen' to take a screenshot" 
+                               FontSize="14" 
+                               Foreground="{DynamicResource SystemControlBaseHighBrush}"
+                               HorizontalAlignment="Center"/>
+                    <!-- Captured image will be displayed here at runtime -->
+                </StackPanel>
+            </Border>
+
+            <!-- Right: AI Results Panel -->
+            <Border Grid.Column="1" 
+                    Margin="10,10,0,10"
+                    Background="{DynamicResource SystemControlPageBackgroundAltBrush}"
+                    CornerRadius="8"
+                    BorderBrush="{DynamicResource SystemControlForegroundMediumBrush}"
+                    BorderThickness="1">
+                <Grid RowDefinitions="Auto, *, Auto">
+                    <!-- Tab Header -->
+                    <TabControl Grid.Row="0" Margin="10">
+                        <TabItem Header="🔍 Detection">
+                            <ListBox ItemsSource="{Binding DetectedObjects}" 
+                                     Margin="5">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="5">
+                                            <TextBlock Text="{Binding Label}" 
+                                                       FontWeight="Bold"/>
+                                            <TextBlock Text="{Binding Confidence}" 
+                                                       Opacity="0.7"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </TabItem>
+                        <TabItem Header="📝 OCR Text">
+                            <TextBox Text="{Binding ExtractedText}" 
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     Margin="5"
+                                     IsReadOnly="True"/>
+                        </TabItem>
+                        <TabItem Header="🌐 Translation">
+                            <StackPanel Margin="5">
+                                <TextBox Text="{Binding TranslatedText}" 
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         IsReadOnly="True"/>
+                                <Button Content="Translate" 
+                                        Command="{Binding TranslateTextCommand}"
+                                        Margin="0,10,0,0"/>
+                            </StackPanel>
+                        </TabItem>
+                    </TabControl>
+
+                    <!-- Status Bar -->
+                    <TextBlock Grid.Row="1"
+                               Text="{Binding StatusText}"
+                               Margin="10"
+                               Foreground="{DynamicResource SystemControlBaseHighBrush}"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Bottom Status Bar -->
+        <Border Grid.Row="2" 
+                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="10,5">
+            <TextBlock Text="Ready" 
+                       x:Name="StatusbarText"
+                       Foreground="{DynamicResource SystemControlBaseHighBrush}"/>
+        </Border>
+    </Grid>
+</Window>

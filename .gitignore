@@ -1,0 +1,8 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+
+# IDE
+.vs/
+*.user
+*.suo

@@ -1,6 +1,6 @@
-# GujLens
+# GlujLens
 
-GujLens is a modern .NET 9 desktop application for text extraction and translation from screenshots. It leverages Avalonia UI for cross-platform compatibility, Microsoft ML.NET for OCR, and Windows Forms NotifyIcon for system tray integration.
+GlujLens is a modern .NET 9 desktop application for text extraction and translation from screenshots. It leverages Avalonia UI for cross-platform compatibility, Microsoft ML.NET for OCR, and Windows Forms NotifyIcon for system tray integration.
 
 ## Features
 
@@ -25,7 +25,7 @@ GujLens is a modern .NET 9 desktop application for text extraction and translati
 ## Project Structure
 
 ```
-GujLens/
+GlujLens/
 ├── Models/
 │   ├── AppSettings.cs          # Application configuration model
 │   ├── CaptureResult.cs        # Screenshot capture result model
@@ -47,7 +47,7 @@ GujLens/
 ├── App.axaml                   # Application resources
 ├── App.axaml.cs                # Application lifecycle
 ├── Program.cs                  # Entry point
-└── GujLens.csproj              # Project file
+└── GlujLens.csproj              # Project file
 ```
 
 ## System Tray
@@ -84,13 +84,13 @@ dotnet build
 ### Run
 
 ```bash
-dotnet run --project GujLens/GujLens.csproj
+dotnet run --project GlujLens/GlujLens.csproj
 ```
 
 ### Publish
 
 ```bash
-dotnet publish GujLens/GujLens.csproj -c Release -r win-x64 --self-contained false
+dotnet publish GlujLens/GlujLens.csproj -c Release -r win-x64 --self-contained false
 ```
 
 ## Configuration

@@ -1,8 +1,0 @@
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\GujLens.csproj.AssemblyReference.cache
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\Avalonia\Resources.Inputs.cache
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\Avalonia\resources
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\GujLens.GeneratedMSBuildEditorConfig.editorconfig
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\GujLens.AssemblyInfoInputs.cache
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\GujLens.AssemblyInfo.cs
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\GujLens.csproj.CoreCompileInputs.cache
-c:\Users\prote\Downloads\dev\GujLens\GujLens\obj\Debug\net9.0\GujLens.sourcelink.json

@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlujLens", "GlujLens\GlujLens.csproj", "{91F563AD-DF5B-64D2-08EE-15BC89B26F84}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{91F563AD-DF5B-64D2-08EE-15BC89B26F84}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{91F563AD-DF5B-64D2-08EE-15BC89B26F84}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{91F563AD-DF5B-64D2-08EE-15BC89B26F84}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{91F563AD-DF5B-64D2-08EE-15BC89B26F84}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {180BD7B3-B5C7-4905-B672-F2F3E7CA3375}
+	EndGlobalSection
+EndGlobal
