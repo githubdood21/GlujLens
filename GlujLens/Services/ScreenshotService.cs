@@ -116,7 +116,7 @@ public class ScreenshotService : IScreenshotService
         return await CaptureFullScreenAsync();
     }
 
-    private static async Task<CaptureResult> ConvertToCaptureResultAsync(Bitmap bitmap)
+    private async Task<CaptureResult> ConvertToCaptureResultAsync(Bitmap bitmap)
     {
         return new CaptureResult
         {
@@ -128,10 +128,17 @@ public class ScreenshotService : IScreenshotService
         };
     }
 
-    private static byte[] BitmapToBytes(Bitmap bitmap)
+    private byte[] BitmapToBytes(Bitmap bitmap)
     {
         using var ms = new MemoryStream();
-        bitmap.Save(ms, ImageFormat.Png);
+        var format = _settings.ImageFormat?.ToUpper() ?? "PNG";
+        ImageFormat? imageFormat = format switch
+        {
+            "JPEG" => ImageFormat.Jpeg,
+            "BMP" => ImageFormat.Bmp,
+            "PNG" or _ => ImageFormat.Png
+        };
+        bitmap.Save(ms, imageFormat);
         return ms.ToArray();
     }
 }

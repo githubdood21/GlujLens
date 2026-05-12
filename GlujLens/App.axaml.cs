@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using GlujLens.Models;
 using GlujLens.Services;
 using GlujLens.ViewModels;
 using GlujLens.Views;
@@ -26,6 +27,8 @@ public partial class App : Avalonia.Application
 
         // Configure services
         serviceCollection.AddSingleton<ITrayIconService, TrayIconService>();
+        serviceCollection.AddSingleton<IScreenshotService, ScreenshotService>();
+        serviceCollection.AddSingleton<AppSettings>();
         serviceCollection.AddSingleton<MainViewModel>();
 
         // Add logging (minimal console logging for now)
@@ -99,11 +102,12 @@ public partial class App : Avalonia.Application
     {
         if (desktop.MainWindow == null)
         {
-            var mainViewModel = _services.GetRequiredService<MainViewModel>();
-            var mainWindow = new MainWindow(_trayIcon!)
-            {
-                DataContext = mainViewModel,
-            };
+            var trayIcon = _services.GetRequiredService<ITrayIconService>();
+            var screenshotService = _services.GetRequiredService<IScreenshotService>();
+            var settings = _services.GetRequiredService<AppSettings>();
+            var serviceProvider = _services;
+            var mainWindow = new MainWindow(trayIcon, screenshotService, settings, serviceProvider);
+            mainWindow.DataContext = _services.GetRequiredService<MainViewModel>();
             desktop.MainWindow = mainWindow;
             mainWindow.Closing += MainWindow_Closing;
             mainWindow.Show();

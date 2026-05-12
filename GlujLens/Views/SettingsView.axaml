@@ -1,0 +1,126 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:GlujLens.ViewModels"
+        x:Class="GlujLens.Views.SettingsView"
+        mc:Ignorable="d"
+        Width="550"
+        Height="600"
+        MinWidth="400"
+        MinHeight="400"
+        Title="GlujLens - Settings"
+        WindowStartupLocation="CenterOwner"
+        SizeToContent="WidthAndHeight"
+        CanResize="False">
+
+    <Design.DataContext>
+        <vm:SettingsViewModel />
+    </Design.DataContext>
+
+    <ScrollViewer>
+        <StackPanel Margin="20">
+            <!-- General Settings -->
+            <TextBlock Text="General Settings" 
+                       FontSize="18" 
+                       FontWeight="Bold"
+                       Margin="0,0,0,15"/>
+
+            <!-- Default Save Directory -->
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Default Save Directory" FontSize="13"/>
+                <TextBox Text="{Binding DefaultSaveDirectory}" Margin="0,5,0,5"/>
+            </StackPanel>
+
+            <Button Content="Browse" 
+                    Command="{Binding BrowseSaveDirectoryCommand}"
+                    Margin="0,0,0,15"
+                    MinWidth="80"
+                    HorizontalAlignment="Left"/>
+
+            <!-- Screenshot Settings -->
+            <TextBlock Text="Screenshot Settings" 
+                       FontSize="18" 
+                       FontWeight="Bold"
+                       Margin="0,10,0,15"/>
+
+            <!-- Capture Shortcut -->
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Capture Shortcut" FontSize="13"/>
+                <StackPanel Orientation="Horizontal" Margin="0,5,0,5">
+                    <TextBox Text="{Binding RecordedShortcutText}" 
+                             MinWidth="200"
+                             IsReadOnly="{Binding IsRecordingShortcut}"/>
+                    <Button Content="Record" 
+                            Command="{Binding StartRecordingShortcutCommand}"
+                            Margin="10,0,0,0"
+                            IsVisible="{Binding !IsRecordingShortcut, Mode=OneWay}"/>
+                    <Button Content="Stop" 
+                            Command="{Binding StopRecordingShortcutCommand}"
+                            Margin="10,0,0,0"
+                            IsVisible="{Binding IsRecordingShortcut, Mode=OneWay}"
+                            Classes="accent"/>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Hardware Acceleration -->
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Hardware Acceleration" FontSize="13"/>
+                <ComboBox SelectedItem="{Binding HardwareAcceleration}" 
+                          ItemsSource="{Binding HardwareAccelerationOptions}"
+                          Margin="0,5,0,0"
+                          MinWidth="200"/>
+            </StackPanel>
+
+            <!-- Image Format -->
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Image Format" FontSize="13"/>
+                <ComboBox SelectedItem="{Binding ImageFormat}" 
+                          ItemsSource="{Binding ImageFormatOptions}"
+                          Margin="0,5,0,0"
+                          MinWidth="200"/>
+            </StackPanel>
+
+            <!-- Image Quality -->
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Image Quality: {Binding ImageQuality}" FontSize="13"/>
+                <Slider Minimum="10" 
+                        Maximum="100" 
+                        Value="{Binding ImageQuality}"
+                        SmallChange="5"
+                        LargeChange="10"
+                        Margin="0,5,0,0"
+                        MinWidth="300"/>
+            </StackPanel>
+
+            <!-- Options -->
+            <StackPanel Margin="0,10,0,10">
+                <CheckBox Content="Copy to clipboard after capture" 
+                          IsChecked="{Binding CopyToClipboardAfterCapture}"
+                          Margin="0,3,0,3"/>
+                <CheckBox Content="Show notification after capture" 
+                          IsChecked="{Binding ShowNotificationAfterCapture}"
+                          Margin="0,3,0,3"/>
+            </StackPanel>
+
+            <Border BorderBrush="{DynamicResource SystemControlForegroundMediumBrush}"
+                    BorderThickness="0,1,0,0"
+                    Margin="0,15"/>
+
+            <!-- Status Message -->
+            <TextBlock Text="{Binding StatusMessage}" 
+                       FontSize="12"
+                       Foreground="{DynamicResource SystemControlBaseHighBrush}"
+                       Margin="0,0,0,15"/>
+
+            <!-- Action Buttons -->
+            <StackPanel Orientation="Horizontal" 
+                        HorizontalAlignment="Right" 
+                        Spacing="10">
+                <Button Content="Reset to Defaults" 
+                        Command="{Binding ResetToDefaultsCommand}"
+                        MinWidth="120"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

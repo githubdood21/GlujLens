@@ -1,26 +1,52 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
+using GlujLens.Models;
 using GlujLens.Services;
 using GlujLens.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GlujLens.Views;
 
 public partial class MainWindow : Window
 {
     private readonly ITrayIconService _trayIcon;
+    private readonly IScreenshotService _screenshotService;
+    private readonly AppSettings _settings;
+    private HotkeyService? _hotkeyService;
     private bool _isMinimizing;
 
-    public MainWindow(ITrayIconService trayIcon)
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetActiveWindow();
+
+    public MainWindow(ITrayIconService trayIcon, IScreenshotService screenshotService, AppSettings settings, IServiceProvider serviceProvider)
     {
         InitializeComponent();
         _trayIcon = trayIcon;
+        _screenshotService = screenshotService;
+        _settings = settings;
 
         // Handle window closing to minimize to tray instead of quitting
         Closing += MainWindow_Closing;
 
-        DataContext = new MainViewModel(trayIcon);
+        // Use DI to get the same MainViewModel instance that's used elsewhere
+        DataContext = serviceProvider.GetRequiredService<MainViewModel>();
+
+        // Initialize hotkey service after window is shown
+        Opened += OnOpenedInternal;
+    }
+
+    private void OnOpenedInternal(object? sender, EventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+        {
+            _hotkeyService = new HotkeyService(vm, _settings);
+            var success = _hotkeyService.RegisterHotkey();
+            System.Diagnostics.Debug.WriteLine($"Hotkey registration: {(success ? "Success" : "Failed")} - {_settings.CaptureShortcut}");
+        }
     }
 
     private void InitializeComponent()

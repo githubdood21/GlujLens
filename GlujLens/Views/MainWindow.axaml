@@ -50,18 +50,39 @@
                     CornerRadius="8"
                     BorderBrush="{DynamicResource SystemControlForegroundMediumBrush}"
                     BorderThickness="1">
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <TextBlock Text="Screenshot Preview" 
-                               FontSize="24" 
-                               Foreground="{DynamicResource SystemControlBaseHighBrush}"
-                               HorizontalAlignment="Center"
-                               Margin="0,0,0,20"/>
-                    <TextBlock Text="Click 'Capture Screen' to take a screenshot" 
-                               FontSize="14" 
-                               Foreground="{DynamicResource SystemControlBaseHighBrush}"
-                               HorizontalAlignment="Center"/>
-                    <!-- Captured image will be displayed here at runtime -->
-                </StackPanel>
+                <Grid>
+                    <!-- Placeholder text - always present, visible when no image -->
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                x:Name="PlaceholderPanel"
+                                IsVisible="{Binding !CapturedImage}">
+                        <TextBlock Text="Screenshot Preview" 
+                                   FontSize="24" 
+                                   Foreground="{DynamicResource SystemControlBaseHighBrush}"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,20"/>
+                        <TextBlock Text="Click 'Capture Screen' to take a screenshot" 
+                                   FontSize="14" 
+                                   Foreground="{DynamicResource SystemControlBaseHighBrush}"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <!-- Captured image overlay -->
+                    <Image Source="{Binding CapturedImage}" 
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+                    <!-- Capture duration overlay -->
+                    <Border Background="#80000000"
+                            Padding="5,3"
+                            CornerRadius="3"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Margin="10"
+                            IsVisible="{Binding CapturedImage}">
+                        <TextBlock Text="{Binding CaptureDuration}" 
+                                   FontSize="12"
+                                   Foreground="White"/>
+                    </Border>
+                </Grid>
             </Border>
 
             <!-- Right: AI Results Panel -->
