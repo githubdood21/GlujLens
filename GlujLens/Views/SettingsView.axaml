@@ -29,7 +29,7 @@
             <!-- Default Save Directory -->
             <StackPanel Margin="0,0,0,10">
                 <TextBlock Text="Default Save Directory" FontSize="13"/>
-                <TextBox Text="{Binding DefaultSaveDirectory}" Margin="0,5,0,5"/>
+                <TextBox Text="{Binding DefaultSaveDirectory, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,5"/>
             </StackPanel>
 
             <Button Content="Browse" 
@@ -48,7 +48,7 @@
             <StackPanel Margin="0,0,0,10">
                 <TextBlock Text="Capture Shortcut" FontSize="13"/>
                 <StackPanel Orientation="Horizontal" Margin="0,5,0,5">
-                    <TextBox Text="{Binding RecordedShortcutText}" 
+                    <TextBox Text="{Binding RecordedShortcutText, UpdateSourceTrigger=PropertyChanged}" 
                              MinWidth="200"
                              IsReadOnly="{Binding IsRecordingShortcut}"/>
                     <Button Content="Record" 
@@ -87,10 +87,10 @@
 
             <!-- Image Quality -->
             <StackPanel Margin="0,0,0,10">
-                <TextBlock Text="Image Quality: {Binding ImageQuality}" FontSize="13"/>
+                <TextBlock Text="{Binding ImageQuality, StringFormat='Image Quality: {0}'}" FontSize="13"/>
                 <Slider Minimum="10" 
                         Maximum="100" 
-                        Value="{Binding ImageQuality}"
+                        Value="{Binding ImageQuality, UpdateSourceTrigger=PropertyChanged}"
                         SmallChange="5"
                         LargeChange="10"
                         Margin="0,5,0,0"

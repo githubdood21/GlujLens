@@ -51,12 +51,20 @@ public partial class MainViewModel : ObservableObject
     private Bitmap? _capturedImage;
 
     [ObservableProperty]
+    private bool _hasCapturedImage;
+
+    [ObservableProperty]
     private string _captureDuration = string.Empty;
 
     private byte[]? _lastCapturedImage;
 
     private readonly IServiceProvider _serviceProvider;
     private HotkeyService? _hotkeyService;
+
+    partial void OnCapturedImageChanged(Bitmap? value)
+    {
+        HasCapturedImage = value != null;
+    }
 
     public MainViewModel(ITrayIconService trayIcon, IScreenshotService screenshotService, AppSettings settings, IServiceProvider serviceProvider)
     {
@@ -394,9 +402,20 @@ public partial class MainViewModel : ObservableObject
     /// Refreshes the hotkey from current settings.
     /// Called when settings change.
     /// </summary>
-    public void RefreshHotkey()
+    public bool RefreshHotkey()
     {
-        _hotkeyService?.RefreshHotkey();
-        StatusText = $"Hotkey refreshed. Capture shortcut: {_settings.CaptureShortcut ?? "Not set"}";
+        var shortcut = _settings.CaptureShortcut ?? "Not set";
+        if (_hotkeyService == null)
+        {
+            StatusText = $"Hotkey refresh failed. Hotkey service is not available for: {shortcut}";
+            System.Diagnostics.Debug.WriteLine("[MainViewModel] Hotkey refresh requested before HotkeyService was attached.");
+            return false;
+        }
+
+        var refreshed = _hotkeyService.RefreshHotkey();
+        StatusText = refreshed
+            ? $"Hotkey refreshed. Capture shortcut: {shortcut}"
+            : $"Hotkey refresh failed. Capture shortcut: {shortcut}";
+        return refreshed;
     }
 }

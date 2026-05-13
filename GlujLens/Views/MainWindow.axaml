@@ -54,7 +54,7 @@
                     <!-- Placeholder text - always present, visible when no image -->
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                                 x:Name="PlaceholderPanel"
-                                IsVisible="{Binding !CapturedImage}">
+                                IsVisible="{Binding !HasCapturedImage}">
                         <TextBlock Text="Screenshot Preview" 
                                    FontSize="24" 
                                    Foreground="{DynamicResource SystemControlBaseHighBrush}"
@@ -77,7 +77,7 @@
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top"
                             Margin="10"
-                            IsVisible="{Binding CapturedImage}">
+                            IsVisible="{Binding HasCapturedImage}">
                         <TextBlock Text="{Binding CaptureDuration}" 
                                    FontSize="12"
                                    Foreground="White"/>

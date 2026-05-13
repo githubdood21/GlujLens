@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "GlujLens",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build GlujLens",
+      "program": "${workspaceFolder}/GlujLens/bin/Debug/net9.0-windows/GlujLens.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/GlujLens",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    }
+  ]
+}

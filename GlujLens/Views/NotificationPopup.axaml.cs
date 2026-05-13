@@ -1,12 +1,7 @@
-using System;
-using System.Runtime.InteropServices;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Layout;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Threading;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.ComponentModel;
+using System.Windows.Forms;
 using GlujLens.Models;
 using GlujLens.Services;
 using GlujLens.ViewModels;
@@ -15,291 +10,232 @@ using WinScreen = System.Windows.Forms.Screen;
 namespace GlujLens.Views;
 
 /// <summary>
-/// A custom notification popup that displays a captured screenshot preview.
-/// Slides in from the top-right with a fade animation.
+/// WinForms notification popup that displays a captured screenshot preview.
+/// Keeping this out of Avalonia avoids desktop lifetime shutdown when the tray-only app has no main window open.
 /// </summary>
-public class NotificationPopup : Window
+public class NotificationPopup : Form
 {
     private readonly MainViewModel _mainVm;
-    private readonly AppSettings _settings;
-    private DispatcherTimer? _autoCloseTimer;
+    private readonly System.Windows.Forms.Timer _autoCloseTimer;
+    private readonly Image? _previewImage;
     private bool _isUserClick;
-    private readonly int _popupWidth;
-    private readonly int _popupHeight;
 
     public NotificationPopup(MainViewModel mainVm, ITrayIconService trayIcon, AppSettings settings, byte[] imageData, int width, int height)
     {
         _mainVm = mainVm;
-        _settings = settings;
+        _previewImage = CreatePreviewImage(imageData);
 
-        // Smaller notification size
-        _popupWidth = 320;
-        _popupHeight = 280;
-        
-        Width = _popupWidth;
-        Height = _popupHeight;
-        MinWidth = 280;
-        MinHeight = 220;
-        MaxWidth = 360;
-        MaxHeight = 320;
-        
-        // No resize, no taskbar entry, always on top
+        AutoScaleMode = AutoScaleMode.Dpi;
+        BackColor = Color.FromArgb(30, 30, 30);
+        ClientSize = new Size(320, 280);
+        FormBorderStyle = FormBorderStyle.None;
+        MaximizeBox = false;
+        MinimizeBox = false;
+        ShowIcon = false;
         ShowInTaskbar = false;
-        Topmost = true;
-        CanResize = false;
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        WindowState = WindowState.Normal;
-        
-        // Translucent background for modern look
-        Background = new SolidColorBrush(Color.FromRgb(30, 30, 30), 0);
+        StartPosition = FormStartPosition.Manual;
+        TopMost = true;
 
-        // Calculate position (top-right corner of primary screen)
-        var primaryScreen = WinScreen.PrimaryScreen;
-        var rightEdge = primaryScreen.WorkingArea.Right - 20;
-        var topEdge = primaryScreen.WorkingArea.Top + 20;
-        Position = new PixelPoint(rightEdge - _popupWidth, topEdge);
+        PositionNearTray();
+        BuildContent(width, height);
 
-        // Store initial state for animation
-        var initialOpacity = 0.0;
-        var initialTop = Position.Y - 50;
-
-        // Set initial invisible state
-        Opacity = initialOpacity;
-        // Start below target position for slide-up effect
-        Position = new PixelPoint(Position.X, initialTop);
-
-        // Create the UI
-        CreateContent(imageData, width, height);
-
-        // Click handler to open main window
-        PointerPressed += OnPointerPressed;
-
-        // Create and start animation
-        CreateAndStartAnimation(initialTop);
-    }
-
-    private void CreateContent(byte[] imageData, int width, int height)
-    {
-        var rootPanel = new Panel
+        _autoCloseTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+        _autoCloseTimer.Tick += (_, _) =>
         {
-            Background = new SolidColorBrush(Color.FromRgb(30, 30, 30))
-        };
-
-        var contentPanel = new Border
-        {
-            Background = new SolidColorBrush(Color.FromRgb(30, 30, 30)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(60, 60, 60)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Margin = new Thickness(8)
-        };
-
-        var innerPanel = new StackPanel { Margin = new Thickness(12) };
-
-        // Header row with title and close button
-        var headerRow = new StackPanel();
-        headerRow.Orientation = Orientation.Horizontal;
-        headerRow.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
-
-        var titleText = new TextBlock
-        {
-            Text = "Screenshot captured",
-            FontSize = 13,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(255, 255, 255)),
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-        };
-        headerRow.Children.Add(titleText);
-
-        // Small "X" close button
-        var closeBtn = new Button
-        {
-            Content = "✕",
-            Width = 22,
-            Height = 22,
-            FontSize = 11,
-            Foreground = new SolidColorBrush(Color.FromRgb(150, 150, 150)),
-            Background = new SolidColorBrush(Color.FromRgb(50, 50, 50)),
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top,
-            Padding = new Thickness(0)
-        };
-        closeBtn.Click += (s, e) => { _isUserClick = true; Close(); };
-        headerRow.Children.Add(closeBtn);
-
-        innerPanel.Children.Add(headerRow);
-
-        // Dimensions message
-        var messageText = new TextBlock
-        {
-            Text = $"{width} × {height}",
-            FontSize = 10,
-            Foreground = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
-            Margin = new Thickness(0, 2, 0, 8)
-        };
-        innerPanel.Children.Add(messageText);
-
-        // Image Preview
-        Bitmap? capturedBitmap = null;
-        try
-        {
-            using var ms = new MemoryStream(imageData);
-            capturedBitmap = new Bitmap(ms);
-        }
-        catch { /* Ignore */ }
-
-        var imageBorder = new Border
-        {
-            Background = new SolidColorBrush(Color.FromRgb(40, 40, 40)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(55, 55, 55)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
-            Margin = new Thickness(0, 0, 0, 8),
-            Height = 160
-        };
-
-        var previewImage = new Avalonia.Controls.Image
-        {
-            Source = capturedBitmap,
-            Stretch = Avalonia.Media.Stretch.UniformToFill,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-        };
-        imageBorder.Child = previewImage;
-        innerPanel.Children.Add(imageBorder);
-
-        // Bottom hint bar
-        var bottomBar = new StackPanel();
-        bottomBar.Orientation = Orientation.Horizontal;
-        bottomBar.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
-
-        var hintText = new TextBlock
-        {
-            Text = "Click to open",
-            FontSize = 9,
-            Foreground = new SolidColorBrush(Color.FromRgb(130, 130, 130)),
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-        };
-        bottomBar.Children.Add(hintText);
-
-        innerPanel.Children.Add(bottomBar);
-
-        contentPanel.Child = innerPanel;
-        rootPanel.Children.Add(contentPanel);
-
-        Content = rootPanel;
-    }
-
-    private void CreateAndStartAnimation(double initialTop)
-    {
-        // Start fade in animation via timer
-        var startTime = DateTime.Now;
-        var fadeDuration = TimeSpan.FromMilliseconds(300);
-        var targetOpacity = 0.92;
-        
-        var fadeTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Normal, (s, e) =>
-        {
-            var elapsed = DateTime.Now - startTime;
-            var progress = Math.Min(1.0, elapsed.TotalMilliseconds / fadeDuration.TotalMilliseconds);
-            
-            // Ease out quad
-            progress = 1.0 - (1.0 - progress) * (1.0 - progress);
-            
-            Opacity = targetOpacity * progress;
-
-            if (progress >= 1.0)
-            {
-                ((DispatcherTimer)s!).Stop();
-                StartAutoCloseTimer();
-            }
-        });
-        fadeTimer.Start();
-
-        // Position animation (slide up)
-        AnimateSlideUp(initialTop);
-    }
-
-    private void AnimateSlideUp(double initialTop)
-    {
-        var targetTop = Position.Y + 50; // The final target position
-        var currentTop = initialTop;
-        var elapsed = TimeSpan.Zero;
-        var duration = TimeSpan.FromMilliseconds(350);
-        var startTime = DateTime.Now;
-
-        var animationTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Normal, (s, e) =>
-        {
-            var now = DateTime.Now;
-            elapsed = now - startTime;
-            var progress = Math.Min(1.0, elapsed.TotalMilliseconds / duration.TotalMilliseconds);
-            
-            // Ease out quad
-            progress = 1.0 - (1.0 - progress) * (1.0 - progress);
-            
-            currentTop = initialTop + (targetTop - initialTop) * progress;
-            Position = new PixelPoint(Position.X, (int)currentTop);
-
-            if (progress >= 1.0)
-            {
-                ((DispatcherTimer)s!).Stop();
-                StartAutoCloseTimer();
-            }
-        });
-        animationTimer.Start();
-    }
-
-    private void StartAutoCloseTimer()
-    {
-        _autoCloseTimer = new DispatcherTimer(TimeSpan.FromSeconds(5), DispatcherPriority.Normal, (s, e) =>
-        {
+            _autoCloseTimer.Stop();
             if (!_isUserClick)
             {
-                Dispatcher.UIThread.Post(() => Close(), DispatcherPriority.Normal);
+                Close();
             }
-        });
-        _autoCloseTimer.Start();
+        };
+
+        Shown += (_, _) => _autoCloseTimer.Start();
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
+    protected override bool ShowWithoutActivation => true;
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool IsIconic(IntPtr hWnd);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    private const int SW_RESTORE = 9;
-    private const int SW_SHOWNORMAL = 1;
-
-    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    protected override CreateParams CreateParams
     {
-        _isUserClick = true;
-        
-        // Stop the auto-close timer
-        _autoCloseTimer?.Stop();
-        
-        // Close this popup first
-        Close();
-        
-        // Use the static callback to show the main window
-        // This properly handles waking from tray and minimized states
-        if (App.ShowMainWindowCallback != null)
+        get
         {
-            try
-            {
-                App.ShowMainWindowCallback(_mainVm);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to show main window: {ex.Message}");
-            }
+            const int WS_EX_NOACTIVATE = 0x08000000;
+            const int WS_EX_TOOLWINDOW = 0x00000080;
+
+            var createParams = base.CreateParams;
+            createParams.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+            return createParams;
         }
     }
 
-    protected override void OnClosed(EventArgs e)
+    private void PositionNearTray()
     {
-        _autoCloseTimer?.Stop();
-        base.OnClosed(e);
+        var workingArea = WinScreen.PrimaryScreen?.WorkingArea ?? WinScreen.AllScreens[0].WorkingArea;
+        Location = new Point(workingArea.Right - Width - 20, workingArea.Top + 20);
+    }
+
+    private void BuildContent(int width, int height)
+    {
+        var shell = new RoundedPanel
+        {
+            BackColor = Color.FromArgb(30, 30, 30),
+            BorderColor = Color.FromArgb(60, 60, 60),
+            BorderRadius = 8,
+            Bounds = new Rectangle(8, 8, ClientSize.Width - 16, ClientSize.Height - 16),
+            Cursor = Cursors.Hand
+        };
+        shell.Click += OnPopupClick;
+        Controls.Add(shell);
+
+        var title = new Label
+        {
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            ForeColor = Color.White,
+            Location = new Point(14, 12),
+            Size = new Size(230, 22),
+            Text = "Screenshot captured",
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        title.Click += OnPopupClick;
+        shell.Controls.Add(title);
+
+        var closeButton = new Button
+        {
+            BackColor = Color.FromArgb(50, 50, 50),
+            Cursor = Cursors.Hand,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(170, 170, 170),
+            Location = new Point(shell.Width - 36, 12),
+            Size = new Size(22, 22),
+            TabStop = false,
+            Text = "X"
+        };
+        closeButton.FlatAppearance.BorderSize = 0;
+        closeButton.Click += (_, _) =>
+        {
+            _isUserClick = true;
+            Close();
+        };
+        shell.Controls.Add(closeButton);
+
+        var dimensions = new Label
+        {
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.FromArgb(180, 180, 180),
+            Location = new Point(14, 34),
+            Size = new Size(230, 18),
+            Text = $"{width} x {height}",
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        dimensions.Click += OnPopupClick;
+        shell.Controls.Add(dimensions);
+
+        var previewBox = new PictureBox
+        {
+            BackColor = Color.FromArgb(40, 40, 40),
+            BorderStyle = BorderStyle.FixedSingle,
+            Cursor = Cursors.Hand,
+            Image = _previewImage,
+            Location = new Point(14, 60),
+            Size = new Size(shell.Width - 28, 160),
+            SizeMode = PictureBoxSizeMode.Zoom
+        };
+        previewBox.Click += OnPopupClick;
+        shell.Controls.Add(previewBox);
+
+        var hint = new Label
+        {
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            Cursor = Cursors.Hand,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.FromArgb(130, 130, 130),
+            Location = new Point(14, 228),
+            Size = new Size(230, 18),
+            Text = "Click to open",
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        hint.Click += OnPopupClick;
+        shell.Controls.Add(hint);
+    }
+
+    private static Image? CreatePreviewImage(byte[] imageData)
+    {
+        try
+        {
+            using var stream = new MemoryStream(imageData);
+            using var sourceImage = Image.FromStream(stream);
+            return new Bitmap(sourceImage);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void OnPopupClick(object? sender, EventArgs e)
+    {
+        _isUserClick = true;
+        _autoCloseTimer.Stop();
+        Close();
+
+        try
+        {
+            App.ShowMainWindowCallback?.Invoke(_mainVm);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to show main window: {ex.Message}");
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _autoCloseTimer.Dispose();
+            _previewImage?.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private sealed class RoundedPanel : Panel
+    {
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public Color BorderColor { get; set; }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int BorderRadius { get; set; }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var path = CreateRoundedRectangle(ClientRectangle, BorderRadius);
+            using var borderPen = new Pen(BorderColor);
+
+            Region = new Region(path);
+            e.Graphics.DrawPath(borderPen, path);
+        }
+
+        private static GraphicsPath CreateRoundedRectangle(Rectangle bounds, int radius)
+        {
+            var diameter = radius * 2;
+            var path = new GraphicsPath();
+
+            path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+            path.AddArc(bounds.Right - diameter - 1, bounds.Top, diameter, diameter, 270, 90);
+            path.AddArc(bounds.Right - diameter - 1, bounds.Bottom - diameter - 1, diameter, diameter, 0, 90);
+            path.AddArc(bounds.Left, bounds.Bottom - diameter - 1, diameter, diameter, 90, 90);
+            path.CloseFigure();
+
+            return path;
+        }
     }
 }

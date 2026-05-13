@@ -15,7 +15,7 @@ public class HotkeyService : IDisposable
     private readonly AppSettings _settings;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly int _hotkeyId = 0xA000;
-    private bool _isRegistered;
+    private readonly HashSet<int> _registeredHotkeyIds = new();
     private bool _isDisposed;
     private DateTime _lastTriggerTime = DateTime.MinValue;
 
@@ -32,42 +32,48 @@ public class HotkeyService : IDisposable
     /// </summary>
     public bool RegisterHotkey()
     {
-        UnregisterHotkey();
+        UnregisterAllHotkeys();
 
-        var shortcut = _settings.CaptureShortcut ?? "Alt+Shift+Q";
+        var shortcut = _settings.CaptureShortcut ?? "Alt+Ctrl+Q";
 
-        var modifiers = ParseModifiers(shortcut);
-        var virtualKey = ParseVirtualKey(shortcut);
-
-        if (virtualKey == 0)
+        if (!TryParseShortcut(shortcut, out var modifiers, out var virtualKey))
         {
             System.Diagnostics.Debug.WriteLine($"[HotkeyService] Failed to parse virtual key from shortcut: {shortcut}");
             return false;
         }
 
-        _isRegistered = User32.RegisterHotKey(_hotkeyWindow.Handle, _hotkeyId, modifiers, virtualKey);
+        var registered = User32.RegisterHotKey(_hotkeyWindow.Handle, _hotkeyId, modifiers, virtualKey);
 
-        if (!_isRegistered)
+        if (!registered)
         {
             var error = Marshal.GetLastWin32Error();
             System.Diagnostics.Debug.WriteLine($"[HotkeyService] RegisterHotKey failed (error {error}) for shortcut: {shortcut}");
             return false;
         }
 
+        _registeredHotkeyIds.Add(_hotkeyId);
         System.Diagnostics.Debug.WriteLine($"[HotkeyService] RegisterHotKey succeeded for shortcut: {shortcut} (MOD=0x{modifiers:X2}, VK=0x{virtualKey:X2})");
         return true;
     }
 
     /// <summary>
-    /// Unregisters the hotkey.
+    /// Unregisters every hotkey this service has registered.
     /// </summary>
-    public void UnregisterHotkey()
+    public void UnregisterAllHotkeys()
     {
-        if (_isRegistered && _hotkeyWindow.Handle != IntPtr.Zero)
+        if (_hotkeyWindow.Handle == IntPtr.Zero || _registeredHotkeyIds.Count == 0)
+            return;
+
+        foreach (var hotkeyId in _registeredHotkeyIds.ToArray())
         {
-            User32.UnregisterHotKey(_hotkeyWindow.Handle, _hotkeyId);
-            _isRegistered = false;
+            if (!User32.UnregisterHotKey(_hotkeyWindow.Handle, hotkeyId))
+            {
+                var error = Marshal.GetLastWin32Error();
+                System.Diagnostics.Debug.WriteLine($"[HotkeyService] UnregisterHotKey failed (error {error}) for id: {hotkeyId}");
+            }
         }
+
+        _registeredHotkeyIds.Clear();
     }
 
     /// <summary>
@@ -98,16 +104,16 @@ public class HotkeyService : IDisposable
         }
     }
 
-    public void RefreshHotkey()
+    public bool RefreshHotkey()
     {
-        RegisterHotkey();
+        return RegisterHotkey();
     }
 
     public void Dispose()
     {
         if (!_isDisposed)
         {
-            UnregisterHotkey();
+            UnregisterAllHotkeys();
             _hotkeyWindow.Dispose();
             _isDisposed = true;
         }
@@ -140,6 +146,18 @@ public class HotkeyService : IDisposable
             extractedKey = extractedKey.Replace(mod, "", StringComparison.OrdinalIgnoreCase);
         }
         return MapKeyToVirtualKey(extractedKey.Trim());
+    }
+
+    public static bool CanParseShortcut(string shortcut)
+    {
+        return TryParseShortcut(shortcut, out _, out _);
+    }
+
+    private static bool TryParseShortcut(string shortcut, out uint modifiers, out uint virtualKey)
+    {
+        modifiers = ParseModifiers(shortcut);
+        virtualKey = ParseVirtualKey(shortcut);
+        return virtualKey != 0;
     }
 
     private static uint MapKeyToVirtualKey(string keyName)
@@ -192,6 +210,9 @@ public class HotkeyService : IDisposable
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr CreateWindowEx(int dwExStyle, string lpClassName, string lpWindowName, int dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool DestroyWindow(IntPtr hWnd);
     }
 
     #endregion
@@ -223,7 +244,9 @@ public class HotkeyService : IDisposable
         {
             if (!_disposed && Handle != IntPtr.Zero)
             {
+                var handle = Handle;
                 ReleaseHandle();
+                User32.DestroyWindow(handle);
                 _disposed = true;
             }
         }

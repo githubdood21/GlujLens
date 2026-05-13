@@ -14,7 +14,6 @@ namespace GlujLens.Views;
 public partial class MainWindow : Window
 {
     private readonly ITrayIconService _trayIcon;
-    private bool _isMinimizing;
 
     public MainWindow(ITrayIconService trayIcon)
     {
@@ -28,34 +27,6 @@ public partial class MainWindow : Window
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
-    }
-
-    protected override void OnOpened(EventArgs e)
-    {
-        base.OnOpened(e);
-
-        // Subscribe to layout updated to check for minimize
-        LayoutUpdated += OnLayoutUpdated;
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        LayoutUpdated -= OnLayoutUpdated;
-        base.OnClosed(e);
-    }
-
-    private void OnLayoutUpdated(object? sender, EventArgs e)
-    {
-        if (_isMinimizing)
-            return;
-
-        if (WindowState == WindowState.Minimized)
-        {
-            _isMinimizing = true;
-            Hide();
-            _trayIcon.ShowIcon();
-            _isMinimizing = false;
-        }
     }
 
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)

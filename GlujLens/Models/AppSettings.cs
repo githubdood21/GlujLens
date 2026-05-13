@@ -26,9 +26,9 @@ public class AppSettings : INotifyPropertyChanged
     public AppSettings()
     {
         _settingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
-        // Initialize with defaults - do NOT call Load() in constructor
-        _defaultSaveDirectory = null;
-        _captureShortcut = "Alt+Shift+Q";
+        // Initialize with defaults - startup calls Load() once the app is ready.
+        _defaultSaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        _captureShortcut = "Alt+Ctrl+Q";
         _hardwareAcceleration = "Auto";
         _imageFormat = "PNG";
         _imageQuality = 90;
@@ -62,13 +62,13 @@ public class AppSettings : INotifyPropertyChanged
             if (dto != null)
             {
                 DefaultSaveDirectory = dto.DefaultSaveDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-                CaptureShortcut = dto.CaptureShortcut ?? "Alt+Shift+Q";
+                CaptureShortcut = dto.CaptureShortcut ?? "Alt+Ctrl+Q";
                 HardwareAcceleration = dto.HardwareAcceleration ?? "Auto";
                 ImageFormat = dto.ImageFormat ?? "PNG";
-                ImageQuality = dto.ImageQuality;
-                CopyToClipboardAfterCapture = dto.CopyToClipboardAfterCapture;
-                ShowNotificationAfterCapture = dto.ShowNotificationAfterCapture;
-                UseLocalTesseract = dto.UseLocalTesseract;
+                ImageQuality = dto.ImageQuality ?? 90;
+                CopyToClipboardAfterCapture = dto.CopyToClipboardAfterCapture ?? false;
+                ShowNotificationAfterCapture = dto.ShowNotificationAfterCapture ?? true;
+                UseLocalTesseract = dto.UseLocalTesseract ?? false;
                 TesseractDataPath = dto.TesseractDataPath;
                 GoogleVisionApiKey = dto.GoogleVisionApiKey;
                 GoogleTranslationApiKey = dto.GoogleTranslationApiKey;
@@ -134,10 +134,10 @@ public class AppSettings : INotifyPropertyChanged
             CaptureShortcut = backup.CaptureShortcut;
             HardwareAcceleration = backup.HardwareAcceleration;
             ImageFormat = backup.ImageFormat;
-            ImageQuality = backup.ImageQuality;
-            CopyToClipboardAfterCapture = backup.CopyToClipboardAfterCapture;
-            ShowNotificationAfterCapture = backup.ShowNotificationAfterCapture;
-            UseLocalTesseract = backup.UseLocalTesseract;
+            ImageQuality = backup.ImageQuality ?? 90;
+            CopyToClipboardAfterCapture = backup.CopyToClipboardAfterCapture ?? false;
+            ShowNotificationAfterCapture = backup.ShowNotificationAfterCapture ?? true;
+            UseLocalTesseract = backup.UseLocalTesseract ?? false;
             TesseractDataPath = backup.TesseractDataPath;
             GoogleVisionApiKey = backup.GoogleVisionApiKey;
             GoogleTranslationApiKey = backup.GoogleTranslationApiKey;
@@ -241,10 +241,10 @@ internal class SettingsDto
     public string? CaptureShortcut { get; set; }
     public string? HardwareAcceleration { get; set; }
     public string? ImageFormat { get; set; }
-    public int ImageQuality { get; set; }
-    public bool CopyToClipboardAfterCapture { get; set; }
-    public bool ShowNotificationAfterCapture { get; set; }
-    public bool UseLocalTesseract { get; set; }
+    public int? ImageQuality { get; set; }
+    public bool? CopyToClipboardAfterCapture { get; set; }
+    public bool? ShowNotificationAfterCapture { get; set; }
+    public bool? UseLocalTesseract { get; set; }
     public string? TesseractDataPath { get; set; }
     public string? GoogleVisionApiKey { get; set; }
     public string? GoogleTranslationApiKey { get; set; }

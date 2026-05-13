@@ -6,27 +6,31 @@ using GlujLens.Models;
 namespace GlujLens.ViewModels;
 
 /// <summary>
-/// View model for the settings window. Simple two-way binding with explicit Save.
+/// View model for the settings window. Changes are written to AppSettings immediately.
 /// </summary>
 public partial class SettingsViewModel : ObservableObject, IDisposable
 {
     private readonly AppSettings _settings;
     private bool _isRecordingShortcut;
     private bool _isDisposed;
+    private bool _isInitializing;
 
     public SettingsViewModel(AppSettings settings)
     {
         _settings = settings;
+        _isInitializing = true;
 
         // Initialize from settings
         DefaultSaveDirectory = settings.DefaultSaveDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-        CaptureShortcut = settings.CaptureShortcut ?? "B";
+        CaptureShortcut = settings.CaptureShortcut ?? "Alt+Ctrl+Q";
         RecordedShortcutText = CaptureShortcut;
         HardwareAcceleration = settings.HardwareAcceleration ?? "Auto";
         ImageFormat = settings.ImageFormat ?? "PNG";
         ImageQuality = settings.ImageQuality;
         CopyToClipboardAfterCapture = settings.CopyToClipboardAfterCapture;
         ShowNotificationAfterCapture = settings.ShowNotificationAfterCapture;
+        StatusMessage = "Settings are saved automatically.";
+        _isInitializing = false;
     }
 
     [ObservableProperty]
@@ -52,6 +56,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _showNotificationAfterCapture;
+
+    [ObservableProperty]
+    private string _statusMessage;
 
     public string[] HardwareAccelerationOptions => new[] { "Auto", "GPU", "CPU (AVX)", "CPU (No AVX)" };
     public string[] ImageFormatOptions => new[] { "PNG", "JPEG", "BMP" };
@@ -96,6 +103,26 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         RecordedShortcutText = "Recording...";
     }
 
+    [RelayCommand]
+    private void StopRecordingShortcut()
+    {
+        CancelRecording();
+    }
+
+    [RelayCommand]
+    private void ResetToDefaults()
+    {
+        DefaultSaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        CaptureShortcut = "Alt+Ctrl+Q";
+        RecordedShortcutText = CaptureShortcut;
+        HardwareAcceleration = "Auto";
+        ImageFormat = "PNG";
+        ImageQuality = 90;
+        CopyToClipboardAfterCapture = false;
+        ShowNotificationAfterCapture = true;
+        IsRecordingShortcut = false;
+    }
+
     /// <summary>
     /// Called when a key is pressed during recording.
     /// </summary>
@@ -103,8 +130,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     {
         if (_isRecordingShortcut)
         {
-            CaptureShortcut = keyName;
-            RecordedShortcutText = keyName;
+            var shortcut = NormalizeShortcut(keyName);
+            CaptureShortcut = shortcut;
+            RecordedShortcutText = shortcut;
             IsRecordingShortcut = false;
         }
     }
@@ -144,6 +172,64 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             System.Diagnostics.Debug.WriteLine($"Failed to save settings: {ex.Message}");
             return false;
         }
+    }
+
+    partial void OnDefaultSaveDirectoryChanged(string value) => SaveIfReady();
+
+    partial void OnCaptureShortcutChanged(string value)
+    {
+        if (!_isRecordingShortcut && RecordedShortcutText != value)
+        {
+            RecordedShortcutText = value;
+        }
+
+        SaveIfReady();
+    }
+
+    partial void OnRecordedShortcutTextChanged(string value)
+    {
+        var shortcut = NormalizeShortcut(value);
+        if (!_isRecordingShortcut && CaptureShortcut != shortcut)
+        {
+            CaptureShortcut = shortcut;
+        }
+    }
+
+    partial void OnHardwareAccelerationChanged(string value) => SaveIfReady();
+
+    partial void OnImageFormatChanged(string value) => SaveIfReady();
+
+    partial void OnImageQualityChanged(int value) => SaveIfReady();
+
+    partial void OnCopyToClipboardAfterCaptureChanged(bool value) => SaveIfReady();
+
+    partial void OnShowNotificationAfterCaptureChanged(bool value) => SaveIfReady();
+
+    private void SaveIfReady()
+    {
+        if (_isInitializing || _isDisposed)
+            return;
+
+        StatusMessage = Save()
+            ? $"Saved at {DateTime.Now:T}"
+            : "Failed to save settings.";
+    }
+
+    private static string NormalizeShortcut(string shortcut)
+    {
+        if (string.IsNullOrWhiteSpace(shortcut))
+            return "Alt+Ctrl+Q";
+
+        var tokens = shortcut
+            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .ToList();
+
+        if (tokens.Count <= 3)
+            return string.Join("+", tokens);
+
+        var mainKey = tokens[^1];
+        return string.Join("+", tokens.Take(2).Append(mainKey));
     }
 
     public void Dispose()

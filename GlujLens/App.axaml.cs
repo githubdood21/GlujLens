@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform;
 using GlujLens.Models;
 using GlujLens.Services;
 using GlujLens.ViewModels;
@@ -63,6 +64,7 @@ public partial class App : Avalonia.Application
             // Create tray icon service FIRST
             _trayIcon = _services.GetRequiredService<ITrayIconService>();
             _settings = _services.GetRequiredService<AppSettings>();
+            _settings.Load();
 
             // Create context menu - uses ShowMainWindow method directly
             var contextMenu = TrayIconService.CreateContextMenu(menuItemName =>
@@ -96,6 +98,7 @@ public partial class App : Avalonia.Application
             // This ensures hotkeys work immediately without needing to open the main window
             _mainVm = new MainViewModel(_trayIcon, _services.GetRequiredService<IScreenshotService>(), _settings, _services);
             _hotkeyService = new HotkeyService(_mainVm, _settings);
+            _mainVm.SetHotkeyService(_hotkeyService);
             _hotkeyService.RegisterHotkey();
             System.Diagnostics.Debug.WriteLine($"Hotkey registration at startup: {_settings.CaptureShortcut}");
 
@@ -138,7 +141,13 @@ public partial class App : Avalonia.Application
         {
             // Window exists - show and activate it
             var window = _desktop.MainWindow;
+            if (window.WindowState == WindowState.Minimized)
+            {
+                window.WindowState = WindowState.Normal;
+            }
+
             window.Show();
+            window.Activate();
             
             // Use Win32 to properly activate the window
             var handle = GetWindowHandle(window);
@@ -151,8 +160,7 @@ public partial class App : Avalonia.Application
 
     private static IntPtr GetWindowHandle(Avalonia.Controls.Window window)
     {
-        var process = System.Diagnostics.Process.GetCurrentProcess();
-        return process.MainWindowHandle;
+        return window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
     }
 
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
