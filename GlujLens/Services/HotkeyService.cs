@@ -1,248 +1,146 @@
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
 using GlujLens.Models;
 using GlujLens.ViewModels;
 
 namespace GlujLens.Services;
 
 /// <summary>
-/// Service for registering global hotkeys using a low-level keyboard hook.
-/// This does NOT consume the key - the key still reaches other apps.
+/// Service for registering global hotkeys using Windows RegisterHotKey API.
+/// This registers the key combination as a whole - individual keys are not consumed.
 /// </summary>
 public class HotkeyService : IDisposable
 {
-    private const int WH_KEYBOARD_LL = 13;
-    private const int WM_KEYDOWN = 0x0100;
-    private const int WM_SYSKEYDOWN = 0x0104;
-
-    // Scan codes for Alt and right Alt
-    private const uint SCAN_ALT = 0x38;       // Scan code for left Alt
-    private const uint SCAN_ALT_EXTENDED = 0xE038; // Right Alt (AltGr)
-    private const uint KHF_ALTDOWN = 0x40;    // Context code bit indicating ALT was held
-
     private readonly WeakReference _mainViewModelRef;
     private readonly AppSettings _settings;
+    private readonly HotkeyWindow _hotkeyWindow;
     private readonly int _hotkeyId = 0xA000;
-    private IntPtr _hookHandle = IntPtr.Zero;
-    private LowLevelKeyboardProc _keyboardProc;
+    private bool _isRegistered;
     private bool _isDisposed;
     private DateTime _lastTriggerTime = DateTime.MinValue;
-
-    /// <summary>
-    /// Event raised when the hotkey is pressed.
-    /// </summary>
-    public event Action? HotKeyPressed;
 
     public HotkeyService(object mainViewModel, AppSettings settings)
     {
         _mainViewModelRef = new WeakReference(mainViewModel);
         _settings = settings;
-        _keyboardProc = KeyboardHookProc;
+        _hotkeyWindow = new HotkeyWindow(this);
     }
 
     /// <summary>
-    /// Registers the low-level keyboard hook.
+    /// Registers the hotkey using Windows RegisterHotKey API.
+    /// Must be called from a thread with a message loop.
     /// </summary>
     public bool RegisterHotkey()
     {
         UnregisterHotkey();
 
-        // Get the module handle for the hook
-        var handle = GetModuleHandle(IntPtr.Zero);
-        if (handle == IntPtr.Zero)
+        var shortcut = _settings.CaptureShortcut ?? "Alt+Shift+Q";
+
+        var modifiers = ParseModifiers(shortcut);
+        var virtualKey = ParseVirtualKey(shortcut);
+
+        if (virtualKey == 0)
         {
+            System.Diagnostics.Debug.WriteLine($"[HotkeyService] Failed to parse virtual key from shortcut: {shortcut}");
             return false;
         }
 
-        // Install the hook - must be called from a thread with a message queue
-        _hookHandle = SetWindowsHookEx(
-            WH_KEYBOARD_LL,
-            _keyboardProc,
-            handle,
-            0); // 0 = hook all threads
+        _isRegistered = User32.RegisterHotKey(_hotkeyWindow.Handle, _hotkeyId, modifiers, virtualKey);
 
-        if (_hookHandle == IntPtr.Zero)
+        if (!_isRegistered)
         {
+            var error = Marshal.GetLastWin32Error();
+            System.Diagnostics.Debug.WriteLine($"[HotkeyService] RegisterHotKey failed (error {error}) for shortcut: {shortcut}");
             return false;
         }
 
+        System.Diagnostics.Debug.WriteLine($"[HotkeyService] RegisterHotKey succeeded for shortcut: {shortcut} (MOD=0x{modifiers:X2}, VK=0x{virtualKey:X2})");
         return true;
     }
 
     /// <summary>
-    /// Unregisters the keyboard hook.
+    /// Unregisters the hotkey.
     /// </summary>
     public void UnregisterHotkey()
     {
-        if (_hookHandle != IntPtr.Zero)
+        if (_isRegistered && _hotkeyWindow.Handle != IntPtr.Zero)
         {
-            UnhookWindowsHookEx(_hookHandle);
-            _hookHandle = IntPtr.Zero;
+            User32.UnregisterHotKey(_hotkeyWindow.Handle, _hotkeyId);
+            _isRegistered = false;
         }
     }
 
     /// <summary>
-    /// Low-level keyboard hook procedure.
-    /// Returns 0 to allow the key to pass through, non-zero to suppress it.
-    /// We return 0 so the key still reaches other applications.
+    /// Called by HotkeyWindow when WM_HOTKEY is received.
     /// </summary>
-    private IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    internal void OnHotKeyPressed()
     {
-        if (nCode < 0 || _isDisposed)
-            return CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+        var now = DateTime.Now;
+        if ((now - _lastTriggerTime).TotalMilliseconds < 500)
+            return;
 
-        bool isKeyDown = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
-        if (!isKeyDown)
-            return CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+        _lastTriggerTime = now;
 
-        var keyboardHookStruct = (KeyboardHookStruct)Marshal.PtrToStructure(lParam, typeof(KeyboardHookStruct))!;
-
-        // Extract flags and scan code directly from the struct memory layout.
-        // KBDLLHOOKSTRUCT layout: vkCode (uint), scanCode (uint), flags (uint), time (uint), dwExtraInfo (IntPtr)
-        // sizeof(uint) = 4, so:
-        //   vkCode at offset 0
-        //   scanCode at offset 4
-        //   flags at offset 8
-        //   time at offset 12
-        //   dwExtraInfo at offset 16
-        uint scanCode = keyboardHookStruct.scanCode;
-        uint flags = keyboardHookStruct.flags;
-
-        // Check if the pressed key matches the configured hotkey
-        // Pass the message type, scan code, and flags for accurate modifier detection
-        if (IsHotkeyPressed(keyboardHookStruct.vkCode, scanCode, flags, wParam == (IntPtr)WM_SYSKEYDOWN))
+        var vm = _mainViewModelRef.Target;
+        if (vm is MainViewModel mainVm)
         {
-            // Throttle triggers to prevent too many rapid-fire calls
-            var now = DateTime.Now;
-            if ((now - _lastTriggerTime).TotalMilliseconds > 500)
+            try
             {
-                _lastTriggerTime = now;
-
-                // Invoke the hotkey event on the UI thread
-                var vm = _mainViewModelRef.Target;
-                if (vm is MainViewModel mainVm)
+                if (mainVm.CaptureCommand.CanExecute(null))
                 {
-                    try
-                    {
-                        if (mainVm.CaptureCommand.CanExecute(null))
-                        {
-                            mainVm.CaptureCommand.Execute(null);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Hotkey trigger error: {ex.Message}");
-                    }
+                    mainVm.CaptureCommand.Execute(null);
                 }
             }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Hotkey trigger error: {ex.Message}");
+            }
         }
-
-        // IMPORTANT: Return 0 to LET the key pass through to other applications
-        return CallNextHookEx(_hookHandle, nCode, wParam, lParam);
     }
 
-    /// <summary>
-    /// Checks if the current key press matches the configured hotkey.
-    /// </summary>
-    /// <param name="vkCode">The virtual key code of the key that was pressed.</param>
-    /// <param name="scanCode">The scan code of the key that was pressed.</param>
-    /// <param name="flags">The flags field from the KBDLLHOOKSTRUCT structure.</param>
-    /// <param name="isSysKeyDown">True if WM_SYSKEYDOWN was received.</param>
-    private bool IsHotkeyPressed(uint vkCode, uint scanCode, uint flags, bool isSysKeyDown)
+    public void RefreshHotkey()
     {
-        var shortcut = _settings.CaptureShortcut ?? "B";
+        RegisterHotkey();
+    }
 
-        // Parse which modifiers the shortcut requires
-        var shortcutRequiresCtrl = shortcut.IndexOf("ctrl", StringComparison.OrdinalIgnoreCase) >= 0
-                              || shortcut.IndexOf("control", StringComparison.OrdinalIgnoreCase) >= 0;
-        var shortcutRequiresShift = shortcut.IndexOf("shift", StringComparison.OrdinalIgnoreCase) >= 0;
-        var shortcutRequiresAlt = shortcut.IndexOf("alt", StringComparison.OrdinalIgnoreCase) >= 0;
-        var shortcutRequiresWin = shortcut.IndexOf("win", StringComparison.OrdinalIgnoreCase) >= 0
-                            || shortcut.IndexOf("command", StringComparison.OrdinalIgnoreCase) >= 0;
+    public void Dispose()
+    {
+        if (!_isDisposed)
+        {
+            UnregisterHotkey();
+            _hotkeyWindow.Dispose();
+            _isDisposed = true;
+        }
+    }
 
-        // Extract the key part (remove modifier prefixes and plus signs)
+    #region Parsing
+
+    private static uint ParseModifiers(string shortcut)
+    {
+        uint modifiers = 0;
+        var upper = shortcut.ToUpperInvariant();
+
+        if (upper.Contains("ALT"))
+            modifiers |= User32.MOD_ALT;
+        if (upper.Contains("SHIFT"))
+            modifiers |= User32.MOD_SHIFT;
+        if (upper.Contains("CTRL") || upper.Contains("CONTROL"))
+            modifiers |= User32.MOD_CONTROL;
+        if (upper.Contains("WIN") || upper.Contains("COMMAND"))
+            modifiers |= User32.MOD_WIN;
+
+        return modifiers;
+    }
+
+    private static uint ParseVirtualKey(string shortcut)
+    {
         var extractedKey = shortcut;
-        foreach (var mod in new[] { "ctrl+", "control+", "shift+", "alt+", "win+", "command+", "+" })
+        foreach (var mod in new[] { "CTRL+", "CONTROL+", "SHIFT+", "ALT+", "WIN+", "COMMAND+", "+" })
         {
             extractedKey = extractedKey.Replace(mod, "", StringComparison.OrdinalIgnoreCase);
         }
-
-        // Get the expected virtual key code for the main key
-        var expectedVk = MapKeyToVirtualKey(extractedKey);
-        if (expectedVk == 0)
-            return false;
-
-        // For single-key shortcuts (no modifiers), just match the key
-        if (!shortcutRequiresCtrl && !shortcutRequiresShift && !shortcutRequiresAlt && !shortcutRequiresWin)
-        {
-            return expectedVk == vkCode;
-        }
-
-        // For modifier+key shortcuts, check if all required modifiers are currently held down.
-
-        // Check Ctrl
-        if (shortcutRequiresCtrl && (GetKeyState(VK_CONTROL) < 0) == false)
-            return false;
-
-        // Check Shift
-        if (shortcutRequiresShift && (GetKeyState(VK_SHIFT) < 0) == false)
-            return false;
-
-        // Check Win
-        if (shortcutRequiresWin && (GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) == false)
-            return false;
-
-        // Special handling for ALT detection:
-        // Low-level keyboard hooks have a quirk: ALT+key triggers WM_SYSKEYDOWN instead of WM_KEYDOWN,
-        // and GetKeyState(VK_MENU) may not reflect the ALT state because the system is processing
-        // the ALT as part of a "system key" event. We use multiple strategies to detect ALT:
-        //
-        // 1. If WM_SYSKEYDOWN was received and the shortcut requires Alt, ALT was likely the trigger.
-        // 2. Check the KBDLLHOOKSTRUCT flags field's context code (bit 0x40 indicates ALT held).
-        // 3. Check if the scan code is 0x38 (which is the scan code for Alt when it's the triggering key).
-        // 4. Fall back to GetKeyState(VK_MENU).
-        bool altDetected = false;
-        if (shortcutRequiresAlt)
-        {
-            // Strategy 1: WM_SYSKEYDOWN with Alt required usually means Alt triggered this
-            if (isSysKeyDown)
-                altDetected = true;
-
-            // Strategy 2: Check the context code bit in the high byte of flags (KHF_ALTDOWN = 0x40)
-            if (!altDetected && ((flags & KHF_ALTDOWN) != 0))
-                altDetected = true;
-
-            // Strategy 3: If the scan code matches Alt's scan code (0x38), this IS the Alt key press itself
-            if (!altDetected && scanCode == SCAN_ALT)
-                altDetected = true;
-
-            // Strategy 4: Fall back to GetKeyState
-            if (!altDetected && (GetKeyState(VK_MENU) < 0))
-                altDetected = true;
-        }
-
-        if (shortcutRequiresAlt && !altDetected)
-            return false;
-
-        // All required modifiers are held and the main key matches
-        return expectedVk == vkCode;
+        return MapKeyToVirtualKey(extractedKey.Trim());
     }
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern int CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-    [DllImport("user32.dll")]
-    private static extern int GetKeyState(int vKey);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GetModuleHandle(IntPtr lpModuleName);
 
     private static uint MapKeyToVirtualKey(string keyName)
     {
@@ -266,31 +164,70 @@ public class HotkeyService : IDisposable
             "RETURN" => 0x0D, "ENTER" => 0x0D,
             "ESCAPE" => 0x1B, "SPACE" => 0x20,
             "INSERT" => 0x2D, "DELETE" => 0x2E,
+            "NUMPAD0" => 0x60, "NUMPAD1" => 0x61, "NUMPAD2" => 0x62,
+            "NUMPAD3" => 0x63, "NUMPAD4" => 0x64, "NUMPAD5" => 0x65,
+            "NUMPAD6" => 0x66, "NUMPAD7" => 0x67, "NUMPAD8" => 0x68,
+            "NUMPAD9" => 0x69,
             _ => 0
         };
     }
 
-    private const int VK_CONTROL = 0x11;
-    private const int VK_SHIFT = 0x10;
-    private const int VK_MENU = 0x12;
-    private const int VK_LWIN = 0x5B;
-    private const int VK_RWIN = 0x5C;
+    #endregion
 
-    private struct KeyboardHookStruct
+    #region Win32 Native Methods
+
+    private static class User32
     {
-        public uint vkCode;
-        public uint scanCode;
-        public uint flags;
-        public uint time;
-        public IntPtr dwExtraInfo;
+        public const int WM_HOTKEY = 0x0312;
+        public const uint MOD_ALT = 0x0001;
+        public const uint MOD_CONTROL = 0x0002;
+        public const uint MOD_SHIFT = 0x0004;
+        public const uint MOD_WIN = 0x0008;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint ldvk);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr CreateWindowEx(int dwExStyle, string lpClassName, string lpWindowName, int dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
     }
 
-    public void Dispose()
+    #endregion
+
+    #region Hidden Window for Message Pump
+
+    private class HotkeyWindow : NativeWindow, IDisposable
     {
-        if (!_isDisposed)
+        private readonly HotkeyService _service;
+        private bool _disposed;
+
+        public HotkeyWindow(HotkeyService service)
         {
-            UnregisterHotkey();
-            _isDisposed = true;
+            _service = service;
+            var hWnd = User32.CreateWindowEx(0, "STATIC", "", 0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            AssignHandle(hWnd);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == User32.WM_HOTKEY)
+            {
+                _service.OnHotKeyPressed();
+            }
+            base.WndProc(ref m);
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed && Handle != IntPtr.Zero)
+            {
+                ReleaseHandle();
+                _disposed = true;
+            }
         }
     }
+
+    #endregion
 }

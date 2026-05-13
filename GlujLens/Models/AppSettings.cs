@@ -28,7 +28,7 @@ public class AppSettings : INotifyPropertyChanged
         _settingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
         // Initialize with defaults - do NOT call Load() in constructor
         _defaultSaveDirectory = null;
-        _captureShortcut = "B";
+        _captureShortcut = "Alt+Shift+Q";
         _hardwareAcceleration = "Auto";
         _imageFormat = "PNG";
         _imageQuality = 90;
@@ -62,7 +62,7 @@ public class AppSettings : INotifyPropertyChanged
             if (dto != null)
             {
                 DefaultSaveDirectory = dto.DefaultSaveDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-                CaptureShortcut = dto.CaptureShortcut ?? "B";
+                CaptureShortcut = dto.CaptureShortcut ?? "Alt+Shift+Q";
                 HardwareAcceleration = dto.HardwareAcceleration ?? "Auto";
                 ImageFormat = dto.ImageFormat ?? "PNG";
                 ImageQuality = dto.ImageQuality;

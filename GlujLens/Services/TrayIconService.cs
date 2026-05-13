@@ -31,6 +31,7 @@ public class TrayIconService : ITrayIconService
             // Wire up click events
             _notifyIcon.DoubleClick += OnIconDoubleClick;
             _notifyIcon.Click += OnIconClick;
+            _notifyIcon.BalloonTipClicked += OnBalloonTipClicked;
 
             _logger.LogInformation("NotifyIcon created successfully");
         }
@@ -42,6 +43,7 @@ public class TrayIconService : ITrayIconService
 
     public event EventHandler? IconClicked;
     public event EventHandler? IconDoubleClicked;
+    public event EventHandler? BalloonTipClicked;
     public event EventHandler<MenuItemClickedEventArgs>? MenuItemClicked;
 
     public void ShowIcon()
@@ -164,6 +166,12 @@ public class TrayIconService : ITrayIconService
     {
         _logger.LogDebug("Tray icon double-clicked");
         IconDoubleClicked?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnBalloonTipClicked(object? sender, EventArgs e)
+    {
+        _logger.LogDebug("Balloon tip clicked");
+        BalloonTipClicked?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

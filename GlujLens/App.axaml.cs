@@ -16,10 +16,17 @@ public partial class App : Avalonia.Application
 {
     private readonly ServiceProvider _services;
     private ITrayIconService? _trayIcon;
-    private readonly ManualResetEvent _formsLoopExit = new ManualResetEvent(false);
+    private HotkeyService? _hotkeyService;
+    private MainViewModel? _mainVm;
+    private AppSettings? _settings;
+    private ManualResetEvent _formsLoopExit;
     private bool _isShuttingDown;
     private DateTime _lastBalloonTime = DateTime.MinValue;
     private readonly object _balloonLock = new object();
+    private IClassicDesktopStyleApplicationLifetime? _desktop;
+
+    // Static callback for notification popup to show main window
+    public static Action<MainViewModel>? ShowMainWindowCallback { get; set; }
 
     public App()
     {
@@ -29,7 +36,6 @@ public partial class App : Avalonia.Application
         serviceCollection.AddSingleton<ITrayIconService, TrayIconService>();
         serviceCollection.AddSingleton<IScreenshotService, ScreenshotService>();
         serviceCollection.AddSingleton<AppSettings>();
-        serviceCollection.AddSingleton<MainViewModel>();
 
         // Add logging (minimal console logging for now)
         serviceCollection.AddLogging(builder =>
@@ -48,12 +54,17 @@ public partial class App : Avalonia.Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        _formsLoopExit = new ManualResetEvent(false);
+        
+        _desktop = ApplicationLifetime as IClassicDesktopStyleApplicationLifetime;
+        
+        if (_desktop != null)
         {
             // Create tray icon service FIRST
             _trayIcon = _services.GetRequiredService<ITrayIconService>();
+            _settings = _services.GetRequiredService<AppSettings>();
 
-            // Create context menu
+            // Create context menu - uses ShowMainWindow method directly
             var contextMenu = TrayIconService.CreateContextMenu(menuItemName =>
             {
                 if (menuItemName == "Quit")
@@ -61,21 +72,17 @@ public partial class App : Avalonia.Application
                     // Gracefully shut down the entire application
                     ShutdownApp();
                 }
-                else if (menuItemName == "Open")
+                else if (menuItemName == "Open" || menuItemName == "Capture" || menuItemName == "Settings")
                 {
-                    // Show main window
-                    ShowMainWindow(desktop);
-                }
-                else if (menuItemName == "Capture")
-                {
-                    // Trigger capture
-                    if (desktop.MainWindow?.DataContext is MainViewModel vm)
-                        vm.HandleMenuItem(menuItemName);
-                }
-                else if (menuItemName == "Settings")
-                {
-                    if (desktop.MainWindow?.DataContext is MainViewModel vm)
-                        vm.HandleMenuItem(menuItemName);
+                    // Use ShowMainWindow for Open, trigger capture/settings for others
+                    if (menuItemName == "Open")
+                    {
+                        ShowMainWindow();
+                    }
+                    else if (_mainVm != null)
+                    {
+                        _mainVm.HandleMenuItem(menuItemName);
+                    }
                 }
             });
 
@@ -85,38 +92,67 @@ public partial class App : Avalonia.Application
             // Show tray icon immediately
             _trayIcon.ShowIcon();
 
-            // Only create main window if user clicks "Open" from tray
-            // Don't show it by default - app runs in background only
+            // Create MainViewModel and register HotkeyService at app startup
+            // This ensures hotkeys work immediately without needing to open the main window
+            _mainVm = new MainViewModel(_trayIcon, _services.GetRequiredService<IScreenshotService>(), _settings, _services);
+            _hotkeyService = new HotkeyService(_mainVm, _settings);
+            _hotkeyService.RegisterHotkey();
+            System.Diagnostics.Debug.WriteLine($"Hotkey registration at startup: {_settings.CaptureShortcut}");
+
+            // Register the callback for showing main window from notification popup
+            // This uses the SAME method as the tray icon "Open" menu item
+            ShowMainWindowCallback = vm =>
+            {
+                // This is called from a background thread, so we need to marshal to the Avalonia UI thread
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    ShowMainWindow();
+                }, Avalonia.Threading.DispatcherPriority.Normal);
+            };
 
             // Handle main window closing to go back to tray
-            if (desktop.MainWindow != null)
+            if (_desktop.MainWindow != null)
             {
-                desktop.MainWindow.Closing += MainWindow_Closing;
+                _desktop.MainWindow.Closing += MainWindow_Closing;
             }
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void ShowMainWindow(IClassicDesktopStyleApplicationLifetime desktop)
+    private void ShowMainWindow()
     {
-        if (desktop.MainWindow == null)
+        if (_desktop == null || _mainVm == null || _trayIcon == null || _settings == null)
+            return;
+            
+        if (_desktop.MainWindow == null)
         {
-            var trayIcon = _services.GetRequiredService<ITrayIconService>();
-            var screenshotService = _services.GetRequiredService<IScreenshotService>();
-            var settings = _services.GetRequiredService<AppSettings>();
-            var serviceProvider = _services;
-            var mainWindow = new MainWindow(trayIcon, screenshotService, settings, serviceProvider);
-            mainWindow.DataContext = _services.GetRequiredService<MainViewModel>();
-            desktop.MainWindow = mainWindow;
+            // Create new main window
+            var mainWindow = new MainWindow(_trayIcon);
+            mainWindow.DataContext = _mainVm; // Use the already-created MainViewModel
+            _desktop.MainWindow = mainWindow;
             mainWindow.Closing += MainWindow_Closing;
             mainWindow.Show();
         }
         else
         {
-            desktop.MainWindow.Show();
-            desktop.MainWindow.WindowState = WindowState.Normal;
+            // Window exists - show and activate it
+            var window = _desktop.MainWindow;
+            window.Show();
+            
+            // Use Win32 to properly activate the window
+            var handle = GetWindowHandle(window);
+            if (handle != IntPtr.Zero)
+            {
+                WindowHelper.ActivateWindow(handle);
+            }
         }
+    }
+
+    private static IntPtr GetWindowHandle(Avalonia.Controls.Window window)
+    {
+        var process = System.Diagnostics.Process.GetCurrentProcess();
+        return process.MainWindowHandle;
     }
 
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
@@ -147,6 +183,10 @@ public partial class App : Avalonia.Application
     {
         if (_isShuttingDown) return;
         _isShuttingDown = true;
+
+        // Dispose hotkey service
+        _hotkeyService?.Dispose();
+        _hotkeyService = null;
 
         // Dispose tray icon
         _trayIcon?.Dispose();

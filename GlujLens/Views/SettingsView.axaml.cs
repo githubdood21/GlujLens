@@ -11,11 +11,14 @@ public partial class SettingsView : Window
     private SettingsViewModel? _settingsVm;
     private bool _isRecording = false;
 
-    public SettingsView(SettingsViewModel settingsViewModel)
+    private readonly MainViewModel? _mainVm;
+
+    public SettingsView(SettingsViewModel settingsViewModel, MainViewModel? mainVm = null)
     {
         InitializeComponent();
         DataContext = settingsViewModel;
         _settingsVm = settingsViewModel;
+        _mainVm = mainVm;
 
         // Listen for key events to capture shortcut
         KeyDown += OnKeyDown;
@@ -104,12 +107,18 @@ public partial class SettingsView : Window
             System.Diagnostics.Debug.WriteLine($"Settings save result: {(success ? "Success" : "Failed")}");
         }
 
-        // 4. Reload settings in the main window's MainViewModel
-        if (Owner?.DataContext is GlujLens.ViewModels.MainViewModel mainVm)
+        // 4. Reload settings and refresh hotkey in the main view model
+        var targetVm = _mainVm;
+        if (targetVm == null && Owner?.DataContext is GlujLens.ViewModels.MainViewModel mv)
+        {
+            targetVm = mv;
+        }
+
+        if (targetVm != null)
         {
             try
             {
-                mainVm.ReloadSettings();
+                targetVm.ReloadSettings();
             }
             catch (Exception ex)
             {

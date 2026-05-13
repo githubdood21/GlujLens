@@ -52,6 +52,11 @@ public interface ITrayIconService
     event EventHandler IconDoubleClicked;
 
     /// <summary>
+    /// Event raised when the balloon tip is clicked.
+    /// </summary>
+    event EventHandler? BalloonTipClicked;
+
+    /// <summary>
     /// Event raised when a menu item is clicked.
     /// </summary>
     event EventHandler<MenuItemClickedEventArgs> MenuItemClicked;

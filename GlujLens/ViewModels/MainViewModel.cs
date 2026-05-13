@@ -56,6 +56,7 @@ public partial class MainViewModel : ObservableObject
     private byte[]? _lastCapturedImage;
 
     private readonly IServiceProvider _serviceProvider;
+    private HotkeyService? _hotkeyService;
 
     public MainViewModel(ITrayIconService trayIcon, IScreenshotService screenshotService, AppSettings settings, IServiceProvider serviceProvider)
     {
@@ -67,12 +68,14 @@ public partial class MainViewModel : ObservableObject
         // Wire up tray icon menu item clicks
         _trayIcon.MenuItemClicked += OnMenuItemClicked;
         _trayIcon.IconDoubleClicked += OnIconDoubleClicked;
+        _trayIcon.BalloonTipClicked += OnBalloonTipClicked;
     }
 
     ~MainViewModel()
     {
         _trayIcon.MenuItemClicked -= OnMenuItemClicked;
         _trayIcon.IconDoubleClicked -= OnIconDoubleClicked;
+        _trayIcon.BalloonTipClicked -= OnBalloonTipClicked;
     }
 
     [RelayCommand]
@@ -113,6 +116,12 @@ public partial class MainViewModel : ObservableObject
                 }
 
                 StatusText = $"Screenshot captured successfully ({result.Width}x{result.Height})";
+
+                // Show notification popup if enabled
+                if (_settings.ShowNotificationAfterCapture)
+                {
+                    ShowCaptureNotification(result.ImageData, result.Width, result.Height);
+                }
             }
             else
             {
@@ -215,8 +224,23 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ShowWindow()
     {
-        IsWindowVisible = true;
-        StatusText = "Window shown";
+        // Try to activate the main window using Win32 APIs
+        try
+        {
+            var success = WindowHelper.ActivateMainWindow();
+            if (success)
+            {
+                StatusText = "Window activated";
+            }
+            else
+            {
+                StatusText = "Window activation attempted";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Window activation failed: {ex.Message}";
+        }
     }
 
     [RelayCommand]
@@ -234,7 +258,7 @@ public partial class MainViewModel : ObservableObject
             // Create a NEW SettingsViewModel each time to ensure a fresh instance
             var settings = _serviceProvider.GetRequiredService<AppSettings>();
             var settingsViewModel = new SettingsViewModel(settings);
-            var settingsWindow = new SettingsView(settingsViewModel);
+            var settingsWindow = new SettingsView(settingsViewModel, this);
             settingsWindow.Show();
             StatusText = "Settings window opened";
         }
@@ -278,6 +302,43 @@ public partial class MainViewModel : ObservableObject
         ShowWindowCommand.Execute(null);
     }
 
+    private void OnBalloonTipClicked(object? sender, EventArgs e)
+    {
+        // When the notification is clicked, show/focus the main window
+        ShowWindowCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Shows a custom notification popup with the captured screenshot preview.
+    /// Uses Avalonia's dispatcher to run on the UI thread.
+    /// </summary>
+    private void ShowCaptureNotification(byte[] imageData, int width, int height)
+    {
+        try
+        {
+            var imageDataCopy = imageData;
+            var w = width;
+            var h = height;
+            
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    var popup = new NotificationPopup(this, _trayIcon, _settings, imageDataCopy, w, h);
+                    popup.Show();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[NotificationPopup] Error: {ex.Message}");
+                }
+            }, Avalonia.Threading.DispatcherPriority.Normal);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[NotificationPopup] Failed to schedule: {ex.Message}");
+        }
+    }
+
     /// <summary>
     /// Handles menu item clicks from the tray icon context menu.
     /// </summary>
@@ -305,13 +366,15 @@ public partial class MainViewModel : ObservableObject
     /// <summary>
     /// Reloads settings from the settings file.
     /// Should be called when the settings window closes.
+    /// Also refreshes the hotkey registration with the new shortcut.
     /// </summary>
     public void ReloadSettings()
     {
         try
         {
             _settings.Reload();
-            StatusText = $"Settings reloaded. Capture shortcut: {_settings.CaptureShortcut ?? "Not set"}";
+            // Refresh the hotkey registration with the new shortcut
+            RefreshHotkey();
         }
         catch (Exception ex)
         {
@@ -320,11 +383,20 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Sets the hotkey service reference (called by MainWindow after creation).
+    /// </summary>
+    public void SetHotkeyService(HotkeyService hotkeyService)
+    {
+        _hotkeyService = hotkeyService;
+    }
+
+    /// <summary>
     /// Refreshes the hotkey from current settings.
-    /// Called by MainWindow when settings change.
+    /// Called when settings change.
     /// </summary>
     public void RefreshHotkey()
     {
+        _hotkeyService?.RefreshHotkey();
         StatusText = $"Hotkey refreshed. Capture shortcut: {_settings.CaptureShortcut ?? "Not set"}";
     }
 }
