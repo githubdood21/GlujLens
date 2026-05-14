@@ -8,6 +8,8 @@ using GlujLens.Views;
 using Microsoft.Extensions.DependencyInjection;
 using System.Collections.ObjectModel;
 using System.Windows.Forms;
+using DrawingBitmap = System.Drawing.Bitmap;
+using DrawingRectangle = System.Drawing.Rectangle;
 
 namespace GlujLens.ViewModels;
 
@@ -19,6 +21,7 @@ public partial class MainViewModel : ObservableObject
     private readonly ITrayIconService _trayIcon;
     private readonly IScreenshotService _screenshotService;
     private readonly IOcrService _ocrService;
+    private readonly ITranslationService _translationService;
     private readonly AppSettings _settings;
 
     [ObservableProperty]
@@ -32,6 +35,9 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isOcrProcessing;
+
+    [ObservableProperty]
+    private bool _isTranslationProcessing;
 
     [ObservableProperty]
     private ObservableCollection<DetectedObject> _detectedObjects = new();
@@ -67,6 +73,9 @@ public partial class MainViewModel : ObservableObject
     private string _selectedOcrText = string.Empty;
 
     [ObservableProperty]
+    private string _selectedTranslatedText = string.Empty;
+
+    [ObservableProperty]
     private string _captureDuration = string.Empty;
 
     private byte[]? _lastCapturedImage;
@@ -79,11 +88,12 @@ public partial class MainViewModel : ObservableObject
         HasCapturedImage = value != null;
     }
 
-    public MainViewModel(ITrayIconService trayIcon, IScreenshotService screenshotService, IOcrService ocrService, AppSettings settings, IServiceProvider serviceProvider)
+    public MainViewModel(ITrayIconService trayIcon, IScreenshotService screenshotService, IOcrService ocrService, ITranslationService translationService, AppSettings settings, IServiceProvider serviceProvider)
     {
         _trayIcon = trayIcon;
         _screenshotService = screenshotService;
         _ocrService = ocrService;
+        _translationService = translationService;
         _settings = settings;
         _serviceProvider = serviceProvider;
 
@@ -251,6 +261,7 @@ public partial class MainViewModel : ObservableObject
         CapturedImageHeight = 0;
         _lastCapturedImage = null;
         SelectedOcrText = string.Empty;
+        SelectedTranslatedText = string.Empty;
         StatusText = "Ready";
     }
 
@@ -285,6 +296,7 @@ public partial class MainViewModel : ObservableObject
             return;
 
         SelectedOcrText = region.Text;
+        SelectedTranslatedText = region.TranslatedText;
         StatusText = $"Selected OCR text: {region.Text}";
 
         try
@@ -298,17 +310,84 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void TranslateText()
+    private async Task TranslateScreenshotAsync()
     {
-        if (string.IsNullOrWhiteSpace(ExtractedText))
+        if (TextRegions.Count == 0)
         {
-            StatusText = "No text to translate";
+            StatusText = "No OCR text regions to translate";
             return;
         }
 
-        StatusText = $"Translating to {_targetLanguage}...";
-        // Translation will be done by the service
-        StatusText = "Translation complete (placeholder)";
+        if (IsProcessing)
+            return;
+
+        IsProcessing = true;
+        IsTranslationProcessing = true;
+        try
+        {
+            StatusText = $"Translating with {_settings.TranslationProvider ?? "translation provider"}...";
+            ClearTranslatedRegions();
+
+            var result = await _translationService.TranslateAsync(TextRegions.ToList());
+            if (!result.Success)
+            {
+                TranslatedText = string.Empty;
+                StatusText = $"Translation failed: {result.ErrorMessage ?? "Unknown error"}";
+                return;
+            }
+
+            ApplyTranslatedRegions(result.Items);
+            TranslatedText = string.Join(
+                Environment.NewLine,
+                result.Items.Select(item => item.TranslatedText));
+            StatusText = result.Items.Count == 0
+                ? "Translation complete; no foreign-language regions matched the selected model"
+                : $"Translation complete; replaced {result.Items.Count} region(s)";
+        }
+        finally
+        {
+            IsTranslationProcessing = false;
+            IsProcessing = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task TranslateSelectedTextAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedOcrText))
+        {
+            StatusText = "Select an OCR region first";
+            return;
+        }
+
+        var selectedRegion = TextRegions.FirstOrDefault(region => region.Text == SelectedOcrText);
+        if (selectedRegion == null)
+        {
+            StatusText = "Selected OCR region is no longer available";
+            return;
+        }
+
+        IsTranslationProcessing = true;
+        try
+        {
+            StatusText = "Translating selected region...";
+            var result = await _translationService.TranslateAsync(new[] { selectedRegion });
+            if (!result.Success)
+            {
+                SelectedTranslatedText = string.Empty;
+                StatusText = $"Selected translation failed: {result.ErrorMessage ?? "Unknown error"}";
+                return;
+            }
+
+            SelectedTranslatedText = result.Items.FirstOrDefault()?.TranslatedText ?? string.Empty;
+            StatusText = string.IsNullOrWhiteSpace(SelectedTranslatedText)
+                ? "Selected region did not match the selected translation model"
+                : "Selected region translated";
+        }
+        finally
+        {
+            IsTranslationProcessing = false;
+        }
     }
 
     [RelayCommand]
@@ -510,15 +589,8 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        if (!string.Equals(_settings.OcrProvider, "Tesseract", StringComparison.OrdinalIgnoreCase))
-        {
-            ExtractedText = string.Empty;
-            TextRegions.Clear();
-            StatusText = $"{_settings.OcrProvider} OCR is not implemented yet";
-            return;
-        }
-
-        StatusText = "Running Tesseract OCR...";
+        var provider = string.IsNullOrWhiteSpace(_settings.OcrProvider) ? "OCR" : _settings.OcrProvider;
+        StatusText = $"Running {provider} OCR...";
         var ocrResult = await _ocrService.ExtractTextAsync(imageData);
         if (!ocrResult.Success)
         {
@@ -530,6 +602,7 @@ public partial class MainViewModel : ObservableObject
 
         ExtractedText = ocrResult.Text;
         SelectedOcrText = string.Empty;
+        SelectedTranslatedText = string.Empty;
         TextRegions.Clear();
         foreach (var region in ocrResult.TextRegions)
         {
@@ -539,5 +612,140 @@ public partial class MainViewModel : ObservableObject
         StatusText = string.IsNullOrWhiteSpace(ExtractedText)
             ? "Screenshot captured; OCR found no text"
             : $"Screenshot captured; OCR extracted {TextRegions.Count} text regions";
+    }
+
+    private void ClearTranslatedRegions()
+    {
+        foreach (var region in TextRegions)
+        {
+            region.TranslatedText = string.Empty;
+        }
+
+        RefreshTextRegions();
+    }
+
+    private void ApplyTranslatedRegions(IReadOnlyList<TranslatedTextItem> translatedItems)
+    {
+        using var sourceBitmap = TryLoadLastCaptureAsBitmap();
+
+        foreach (var item in translatedItems)
+        {
+            if (item.RegionIndex < 0 || item.RegionIndex >= TextRegions.Count)
+            {
+                continue;
+            }
+
+            var region = TextRegions[item.RegionIndex];
+            region.TranslatedText = item.TranslatedText;
+            region.TranslationFontSize = EstimateFontSize(region, item.TranslatedText);
+            var colors = EstimateOverlayColors(sourceBitmap, region);
+            region.TranslationBackground = colors.Background;
+            region.TranslationForeground = colors.Foreground;
+        }
+
+        RefreshTextRegions();
+    }
+
+    private void RefreshTextRegions()
+    {
+        var regions = TextRegions.ToList();
+        TextRegions.Clear();
+        foreach (var region in regions)
+        {
+            TextRegions.Add(region);
+        }
+    }
+
+    private DrawingBitmap? TryLoadLastCaptureAsBitmap()
+    {
+        if (_lastCapturedImage == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new MemoryStream(_lastCapturedImage);
+            return new DrawingBitmap(stream);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static double EstimateFontSize(TextRegion region, string translatedText)
+    {
+        if (region.Height <= 0)
+        {
+            return 12;
+        }
+
+        var baseSize = Math.Max(8, region.Height * 0.72);
+        if (string.IsNullOrWhiteSpace(translatedText) || region.Width <= 0)
+        {
+            return baseSize;
+        }
+
+        var roughWidth = translatedText.Length * baseSize * 0.55;
+        if (roughWidth <= region.Width)
+        {
+            return baseSize;
+        }
+
+        return Math.Max(7, baseSize * region.Width / roughWidth);
+    }
+
+    private static (string Background, string Foreground) EstimateOverlayColors(DrawingBitmap? bitmap, TextRegion region)
+    {
+        if (bitmap == null)
+        {
+            return ("#DDFFFFFF", "#FF000000");
+        }
+
+        var bounds = ClampRegion(bitmap, region, padding: 2);
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return ("#DDFFFFFF", "#FF000000");
+        }
+
+        long red = 0;
+        long green = 0;
+        long blue = 0;
+        var count = 0;
+        var stepX = Math.Max(1, bounds.Width / 14);
+        var stepY = Math.Max(1, bounds.Height / 8);
+
+        for (var y = bounds.Top; y < bounds.Bottom; y += stepY)
+        for (var x = bounds.Left; x < bounds.Right; x += stepX)
+        {
+            var pixel = bitmap.GetPixel(x, y);
+            red += pixel.R;
+            green += pixel.G;
+            blue += pixel.B;
+            count++;
+        }
+
+        if (count == 0)
+        {
+            return ("#DDFFFFFF", "#FF000000");
+        }
+
+        var averageRed = (int)(red / count);
+        var averageGreen = (int)(green / count);
+        var averageBlue = (int)(blue / count);
+        var luminance = 0.2126 * averageRed + 0.7152 * averageGreen + 0.0722 * averageBlue;
+        var foreground = luminance > 140 ? "#FF111111" : "#FFFFFFFF";
+        var background = $"#E6{averageRed:X2}{averageGreen:X2}{averageBlue:X2}";
+        return (background, foreground);
+    }
+
+    private static DrawingRectangle ClampRegion(DrawingBitmap bitmap, TextRegion region, int padding)
+    {
+        var x = Math.Clamp(region.X - padding, 0, bitmap.Width - 1);
+        var y = Math.Clamp(region.Y - padding, 0, bitmap.Height - 1);
+        var right = Math.Clamp(region.X + region.Width + padding, x + 1, bitmap.Width);
+        var bottom = Math.Clamp(region.Y + region.Height + padding, y + 1, bitmap.Height);
+        return DrawingRectangle.FromLTRB(x, y, right, bottom);
     }
 }

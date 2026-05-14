@@ -24,22 +24,25 @@
         <!-- Top Toolbar -->
         <StackPanel Grid.Row="0">
             <StackPanel Orientation="Horizontal" Spacing="10" Margin="10">
-                <Button Content="📷 Capture Screen" 
+                <Button Content="Capture Screen" 
                         Command="{Binding CaptureCommand}"
                         Classes="accent"
                         MinWidth="140"/>
-                <Button Content="📋 Copy to Clipboard" 
+                <Button Content="Copy to Clipboard" 
                         Command="{Binding CopyToClipboardCommand}"
                         MinWidth="150"/>
-                <Button Content="💾 Save Image" 
+                <Button Content="Save Image" 
                         Command="{Binding SaveImageCommand}"
                         MinWidth="120"/>
-                <Button Content="🔎 Run OCR"
+                <Button Content="Run OCR"
                         Command="{Binding RunOcrCommand}"
                         MinWidth="110"/>
-                <Button Content="🧹 Clear Results" 
+                <Button Content="Translate Screenshot"
+                        Command="{Binding TranslateScreenshotCommand}"
+                        MinWidth="150"/>
+                <Button Content="Clear Results" 
                         Command="{Binding ClearResultsCommand}"/>
-                <Button Content="⚙️ Settings" 
+                <Button Content="Settings" 
                         Command="{Binding OpenSettingsCommand}"/>
             </StackPanel>
 
@@ -50,6 +53,20 @@
                         VerticalAlignment="Center"
                         IsVisible="{Binding IsOcrProcessing}">
                 <TextBlock Text="OCR"
+                           VerticalAlignment="Center"
+                           FontSize="12"/>
+                <ProgressBar Width="140"
+                             Height="6"
+                             IsIndeterminate="True"
+                             VerticalAlignment="Center"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal"
+                        Spacing="8"
+                        Margin="10,0,10,8"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding IsTranslationProcessing}">
+                <TextBlock Text="Translation"
                            VerticalAlignment="Center"
                            FontSize="12"/>
                 <ProgressBar Width="140"
@@ -108,19 +125,37 @@
                                 </ItemsControl.Styles>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Button Width="{Binding Width}"
-                                                Height="{Binding Height}"
-                                                MinWidth="0"
-                                                MinHeight="0"
-                                                Padding="0"
-                                                Background="#55FFE166"
-                                                BorderBrush="#DDFFE166"
-                                                BorderThickness="1"
-                                                Command="{Binding $parent[Window].DataContext.SelectTextRegionCommand}"
-                                                CommandParameter="{Binding}"
-                                                ToolTip.Tip="{Binding Text}">
-                                            <TextBlock Text=""/>
-                                        </Button>
+                                        <Grid Width="{Binding Width}"
+                                              Height="{Binding Height}">
+                                            <Button Width="{Binding Width}"
+                                                    Height="{Binding Height}"
+                                                    MinWidth="0"
+                                                    MinHeight="0"
+                                                    Padding="0"
+                                                    Background="#55FFE166"
+                                                    BorderBrush="#DDFFE166"
+                                                    BorderThickness="1"
+                                                    Command="{Binding $parent[Window].DataContext.SelectTextRegionCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="{Binding Text}">
+                                                <TextBlock Text=""/>
+                                            </Button>
+                                            <Border IsVisible="{Binding HasTranslatedText}"
+                                                    Background="{Binding TranslationBackground}"
+                                                    CornerRadius="2"
+                                                    Padding="2"
+                                                    IsHitTestVisible="False">
+                                                <TextBlock Text="{Binding TranslatedText}"
+                                                           Foreground="{Binding TranslationForeground}"
+                                                           FontSize="{Binding TranslationFontSize}"
+                                                           FontWeight="SemiBold"
+                                                           TextWrapping="Wrap"
+                                                           TextAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           HorizontalAlignment="Center"
+                                                           MaxWidth="{Binding Width}"/>
+                                            </Border>
+                                        </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
@@ -148,10 +183,49 @@
                     CornerRadius="8"
                     BorderBrush="{DynamicResource SystemControlForegroundMediumBrush}"
                     BorderThickness="1">
-                <Grid RowDefinitions="Auto, *, Auto">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="12">
+                    <TextBlock Grid.Row="0"
+                               Text="Inspector"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,12"/>
+
+                    <StackPanel Grid.Row="1" Spacing="6">
+                        <TextBlock Text="Selected Text" FontWeight="Bold"/>
+                        <TextBox Text="{Binding SelectedOcrText}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 MinHeight="90"/>
+                        <Button Content="Translate Selected"
+                                Command="{Binding TranslateSelectedTextCommand}"
+                                HorizontalAlignment="Left"
+                                MinWidth="130"
+                                Margin="0,4,0,0"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2" Spacing="6" Margin="0,14,0,0">
+                        <TextBlock Text="Selected Translation" FontWeight="Bold"/>
+                        <TextBox Text="{Binding SelectedTranslatedText}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 IsReadOnly="True"
+                                 MinHeight="130"/>
+                        <TextBlock Text="Manual selected translation does not alter the screenshot overlay."
+                                   FontSize="11"
+                                   Foreground="Gray"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3"
+                               Text="{Binding StatusText}"
+                               Margin="0,12,0,0"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource SystemControlBaseHighBrush}"/>
+                    <Grid IsVisible="False">
                     <!-- Tab Header -->
                     <TabControl Grid.Row="0" Margin="10">
-                        <TabItem Header="🔍 Detection">
+                        <TabItem Header="Detection">
                             <ListBox ItemsSource="{Binding DetectedObjects}" 
                                      Margin="5">
                                 <ListBox.ItemTemplate>
@@ -166,7 +240,7 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
                         </TabItem>
-                        <TabItem Header="📝 OCR Text">
+                        <TabItem Header="OCR Text">
                             <Grid RowDefinitions="Auto,*" Margin="5">
                                 <StackPanel Grid.Row="0" Margin="0,0,0,8">
                                     <TextBlock Text="Selected Text" FontWeight="Bold"/>
@@ -182,7 +256,7 @@
                                          IsReadOnly="True"/>
                             </Grid>
                         </TabItem>
-                        <TabItem Header="🌐 Translation">
+                        <TabItem Header="Translation">
                             <StackPanel Margin="5">
                                 <TextBox Text="{Binding TranslatedText}" 
                                          AcceptsReturn="True"
@@ -200,6 +274,7 @@
                                Text="{Binding StatusText}"
                                Margin="10"
                                Foreground="{DynamicResource SystemControlBaseHighBrush}"/>
+                </Grid>
                 </Grid>
             </Border>
         </Grid>

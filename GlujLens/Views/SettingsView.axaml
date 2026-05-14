@@ -98,7 +98,7 @@
                                       ItemsSource="{Binding OcrProviderOptions}"
                                       Margin="0,5,0,0"
                                       MinWidth="200"/>
-                            <TextBlock Text="Only Tesseract is implemented right now. Google Vision and PaddleOCR are placeholders."
+                            <TextBlock Text="Tesseract and PaddleOCR run locally. Google Vision uses the Google Cloud Vision API."
                                        FontSize="11"
                                        Foreground="Gray"
                                        Margin="0,5,0,0"/>
@@ -106,6 +106,11 @@
 
                         <StackPanel IsVisible="{Binding IsTesseractProvider}">
                             <TextBlock Text="Tesseract tessdata Folder" FontSize="13"/>
+                            <TextBlock Text="Lower OCR quality, but lightweight and reliable. GlujLens runs it through one serialized local engine."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"
+                                       TextWrapping="Wrap"/>
                             <TextBox Text="{Binding TesseractDataPath, UpdateSourceTrigger=PropertyChanged}"
                                      Margin="0,5,0,5"/>
                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -163,12 +168,21 @@
 
                         <StackPanel IsVisible="{Binding IsPaddleOcrProvider}">
                             <TextBlock Text="PaddleOCR Model Folder" FontSize="13"/>
+                            <TextBlock Text="Better OCR quality for screenshots and dense UI text. CPU inference uses multithreading."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"
+                                       TextWrapping="Wrap"/>
                             <TextBox Text="{Binding PaddleOcrModelPath, UpdateSourceTrigger=PropertyChanged}"
                                      Margin="0,5,0,5"/>
                             <Button Content="Browse"
                                     Command="{Binding BrowsePaddleOcrModelPathCommand}"
                                     MinWidth="80"
                                         HorizontalAlignment="Left"/>
+                            <TextBlock Text="Leave empty to use the bundled CPU OCRv5 mobile models."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"/>
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Spacing="16">
@@ -190,6 +204,109 @@
                                          Margin="0,5,0,0"
                                          MinWidth="160"/>
                             </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Translation">
+                <ScrollViewer>
+                    <StackPanel Margin="12" Spacing="12">
+                        <StackPanel>
+                            <TextBlock Text="Translation Provider" FontSize="13"/>
+                            <ComboBox SelectedItem="{Binding TranslationProvider}"
+                                      ItemsSource="{Binding TranslationProviderOptions}"
+                                      Margin="0,5,0,0"
+                                      MinWidth="200"/>
+                            <TextBlock Text="Bergamot and CTranslate2 are local providers. Google API sends text to Google Cloud Translation."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowsTranslationLanguageFields}">
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Source Language" FontSize="13"/>
+                                <TextBox Text="{Binding SourceLanguage, UpdateSourceTrigger=PropertyChanged}"
+                                         Watermark="auto, ja, en, pl..."
+                                         Margin="0,5,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                <TextBlock Text="Target Language" FontSize="13"/>
+                                <TextBox Text="{Binding TargetLanguage, UpdateSourceTrigger=PropertyChanged}"
+                                         Watermark="en, ja, pl..."
+                                         Margin="0,5,0,0"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel IsVisible="{Binding IsBergamotTranslationProvider}">
+                            <TextBlock Text="Bergamot Models Folder" FontSize="13"/>
+                            <TextBlock Text="Choose a folder containing downloaded Bergamot/Marian model folders. Then pick the language-pair model from the dropdown."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"
+                                       TextWrapping="Wrap"/>
+                            <TextBox Text="{Binding BergamotModelsDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,5,0,5"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Browse"
+                                        Command="{Binding BrowseBergamotModelsDirectoryCommand}"
+                                        MinWidth="80"/>
+                                <Button Content="Refresh"
+                                        Command="{Binding RefreshBergamotModelsCommand}"
+                                        MinWidth="80"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Bergamot Model"
+                                       FontSize="13"
+                                       Margin="0,10,0,0"/>
+                            <ComboBox SelectedItem="{Binding SelectedBergamotModel}"
+                                      ItemsSource="{Binding AvailableBergamotModels}"
+                                      Margin="0,5,0,5"
+                                      MinWidth="260"/>
+                            <TextBlock Text="{Binding SelectedBergamotLanguagePair}"
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,4"/>
+                            <TextBlock Text="{Binding BergamotModelPath, StringFormat='Selected path: {0}'}"
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       TextWrapping="Wrap"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                                <Button Content="Test"
+                                        MinWidth="80"
+                                        Click="OpenBergamotTest_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel IsVisible="{Binding IsCTranslate2TranslationProvider}">
+                            <TextBlock Text="CTranslate2 Model Folder" FontSize="13"/>
+                            <TextBlock Text="Local Transformer inference. Choose a converted CTranslate2 model folder and matching tokenizer files."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"
+                                       TextWrapping="Wrap"/>
+                            <TextBox Text="{Binding CTranslate2ModelPath, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,5,0,5"/>
+                            <Button Content="Browse"
+                                    Command="{Binding BrowseCTranslate2ModelPathCommand}"
+                                    MinWidth="80"
+                                    HorizontalAlignment="Left"/>
+                        </StackPanel>
+
+                        <StackPanel IsVisible="{Binding IsGoogleApiTranslationProvider}">
+                            <TextBlock Text="Google Translation API Key" FontSize="13"/>
+                            <TextBlock Text="Uses Google Cloud Translation. The key is stored in local settings.json."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"
+                                       TextWrapping="Wrap"/>
+                            <TextBox Text="{Binding GoogleTranslationApiKey, UpdateSourceTrigger=PropertyChanged}"
+                                     PasswordChar="*"
+                                     Margin="0,5,0,0"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

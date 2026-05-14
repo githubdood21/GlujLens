@@ -1,6 +1,6 @@
 # GlujLens
 
-GlujLens is a Windows desktop screenshot utility for capturing screens, running local OCR, and selecting extracted text directly from the screenshot preview. It uses Avalonia for the UI, a Windows tray icon for background use, and Tesseract for OCR.
+GlujLens is a Windows desktop screenshot utility for capturing screens, running OCR, translating detected text, and selecting extracted text directly from the screenshot preview. It uses Avalonia for the UI, a Windows tray icon for background use, and configurable OCR/translation providers.
 
 ## Current Features
 
@@ -10,18 +10,34 @@ GlujLens is a Windows desktop screenshot utility for capturing screens, running 
 - **All-display long press**: Hold the capture hotkey for 3 seconds to capture all active displays as one image, preserving their virtual desktop positions.
 - **Screenshot preview**: Captured images are shown in the main window with capture dimensions and elapsed capture time.
 - **Save and clipboard actions**: Save screenshots to the configured directory or copy the latest screenshot to the clipboard.
-- **Local Tesseract OCR**: Run OCR on the latest screenshot using `.traineddata` files from the configured tessdata folder.
+- **Multiple OCR providers**: Run OCR using Tesseract, PaddleOCR, or Google Vision.
 - **OCR text overlays**: Detected text regions are highlighted on top of the screenshot; clicking a highlight selects and copies that text.
+- **Translation overlay**: Translate detected foreign-language regions and render translated text over the original screenshot location.
+- **Selection inspector**: Click a detected text region to inspect the original text and manually translate that region without changing the screenshot overlay.
 - **Phrase merging controls**: Tune Tesseract horizontal word gap and vertical line tolerance from Settings.
 - **Automatic settings persistence**: Settings are saved to `settings.json` in the app output folder.
 
 ## OCR Notes
 
-The implemented OCR provider is Tesseract. Google Vision and PaddleOCR appear as placeholders in Settings, but they are not implemented yet.
+The implemented OCR providers are Tesseract, PaddleOCR, and Google Vision.
 
-Tesseract runs through the `Tesseract` NuGet package and native `tesseract50.dll` / `leptonica-1.82.0.dll` binaries. GlujLens caches the Tesseract engine between OCR runs and sets OpenMP thread-count hints at startup. GPU acceleration is not currently used.
+Tesseract runs through the `Tesseract` NuGet package and native `tesseract50.dll` / `leptonica-1.82.0.dll` binaries. It is the lightweight fallback provider, but OCR quality is generally lower than PaddleOCR, especially on screenshots and dense UI text. GlujLens runs Tesseract through one serialized local engine. GPU acceleration is not currently used.
+
+PaddleOCR runs through the `PaddleOCRSharp` NuGet package and its bundled Windows x64 Paddle runtime. It is the higher-quality local provider and supports CPU multithreading. The first implementation uses CPU inference with bundled PP-OCRv5 mobile models by default.
+
+Google Vision uses the Google Cloud Vision API `images:annotate` endpoint with `DOCUMENT_TEXT_DETECTION`. It requires a Google Vision API key in Settings and sends the captured image to Google for OCR.
 
 Language data is discovered from the configured tessdata folder by scanning for `*.traineddata` files. Exact traineddata names such as `eng_std` are supported.
+
+## Translation Notes
+
+Translation is provider-based. The current implemented provider is Bergamot through `BergamotTranslatorSharp`.
+
+Bergamot is local and CPU-friendly. It uses a selected model folder to determine the source and target language pair, for example `ja-en-base`. GlujLens can scan a parent models folder, populate a model dropdown, and run a small Bergamot test window before using the model in the screenshot workflow.
+
+The screenshot-wide translation action translates only OCR regions that appear to match the selected model's source language, then renders the translated text over the detected region. The original screenshot pixels are not permanently modified yet; GlujLens currently uses a visual replacement overlay with sampled background color and fitted text size.
+
+The inspector panel can translate only the currently selected OCR region. This manual translation does not affect the screenshot overlay.
 
 ## Hotkey Behavior
 
@@ -49,7 +65,11 @@ Settings are available from the main window or tray menu. Key options include:
 - Tesseract tessdata folder
 - Tesseract language data
 - Tesseract text merge controls
-- Target language placeholder
+- PaddleOCR model folder override
+- Translation provider
+- Bergamot models folder and selected model
+- CTranslate2 model folder placeholder
+- Google Translation API key placeholder
 
 The settings file is written to:
 
@@ -66,7 +86,16 @@ GlujLens/bin/<configuration>/<target-framework>/settings.json
 - **System.Windows.Forms NotifyIcon**
 - **System.Drawing / GDI screen capture**
 - **Tesseract 5.2.0 NuGet package**
+- **PaddleOCRSharp 6.1.0 NuGet package**
+- **BergamotTranslatorSharp 0.3.4 NuGet package**
 - **SkiaSharp**
+
+## Planned / Experimental
+
+- **Custom local OCR DLL**: A future OCR backend designed specifically for GlujLens, with full GPU acceleration instead of relying on the current CPU PaddleOCRSharp community runtime.
+- **Additional translation providers**: CTranslate2 and Google API translation are present in Settings as planned providers. Bergamot is implemented first because it is local and hardware-friendly.
+- **Model download manager**: A built-in manager for downloading, organizing, and selecting model files for multiple OCR and translation providers.
+- **Better visual replacement**: Improved text removal/replacement, including stronger background cleanup, blur/inpaint-style fills, better color sampling, and better multi-line text fitting.
 
 ## Project Structure
 

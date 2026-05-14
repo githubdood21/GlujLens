@@ -32,11 +32,18 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         OcrProvider = settings.OcrProvider ?? "Tesseract";
         TesseractDataPath = settings.TesseractDataPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
         GoogleVisionApiKey = settings.GoogleVisionApiKey ?? string.Empty;
+        GoogleTranslationApiKey = settings.GoogleTranslationApiKey ?? string.Empty;
+        TranslationProvider = settings.TranslationProvider ?? "Disabled";
+        BergamotModelsDirectory = settings.BergamotModelsDirectory
+            ?? ResolveDefaultBergamotModelsDirectory(settings.BergamotModelPath);
+        BergamotModelPath = settings.BergamotModelPath ?? string.Empty;
+        CTranslate2ModelPath = settings.CTranslate2ModelPath ?? string.Empty;
         PaddleOcrModelPath = settings.PaddleOcrModelPath ?? string.Empty;
         SourceLanguage = settings.SourceLanguage ?? "en-US";
         TargetLanguage = settings.TargetLanguage ?? "en-US";
         TesseractHorizontalMergeGap = settings.TesseractHorizontalMergeGap;
         TesseractVerticalMergeTolerance = settings.TesseractVerticalMergeTolerance;
+        RefreshBergamotModels();
         RefreshTesseractLanguages();
         StatusMessage = "Settings are saved automatically.";
         _isInitializing = false;
@@ -76,6 +83,24 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _googleVisionApiKey;
 
     [ObservableProperty]
+    private string _googleTranslationApiKey;
+
+    [ObservableProperty]
+    private string _translationProvider;
+
+    [ObservableProperty]
+    private string _bergamotModelsDirectory;
+
+    [ObservableProperty]
+    private string? _selectedBergamotModel;
+
+    [ObservableProperty]
+    private string _bergamotModelPath;
+
+    [ObservableProperty]
+    private string _cTranslate2ModelPath;
+
+    [ObservableProperty]
     private string _paddleOcrModelPath;
 
     [ObservableProperty]
@@ -95,15 +120,40 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<string> AvailableTesseractLanguages { get; } = new();
 
+    public ObservableCollection<string> AvailableBergamotModels { get; } = new();
+
     public bool IsTesseractProvider => OcrProvider == "Tesseract";
 
     public bool IsGoogleVisionProvider => OcrProvider == "Google Vision";
 
     public bool IsPaddleOcrProvider => OcrProvider == "PaddleOCR";
 
+    public bool IsTranslationEnabled => TranslationProvider != "Disabled";
+
+    public bool IsBergamotTranslationProvider => TranslationProvider == "Bergamot";
+
+    public bool IsCTranslate2TranslationProvider => TranslationProvider == "CTranslate2";
+
+    public bool IsGoogleApiTranslationProvider => TranslationProvider == "Google API";
+
+    public bool ShowsTranslationLanguageFields => IsCTranslate2TranslationProvider || IsGoogleApiTranslationProvider;
+
+    public string SelectedBergamotLanguagePair
+    {
+        get
+        {
+            var modelName = SelectedBergamotModel ?? Path.GetFileName(BergamotModelPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var languagePair = ExtractLanguagePair(modelName);
+            return string.IsNullOrWhiteSpace(languagePair)
+                ? "Language pair is determined by the selected model."
+                : $"Model language pair: {languagePair}";
+        }
+    }
+
     public string[] ImageFormatOptions => new[] { "PNG", "JPEG", "BMP" };
     public int[] ImageQualityOptions => new[] { 10, 25, 50, 75, 90, 95, 100 };
     public string[] OcrProviderOptions => new[] { "Disabled", "Tesseract", "Google Vision", "PaddleOCR" };
+    public string[] TranslationProviderOptions => new[] { "Disabled", "Bergamot", "CTranslate2", "Google API" };
 
     public bool IsRecordingShortcut
     {
@@ -221,6 +271,77 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private void BrowseBergamotModelsDirectory()
+    {
+        using var dialog = new FolderBrowserDialog();
+        dialog.Description = "Select a folder containing Bergamot model folders";
+        dialog.InitialDirectory = string.IsNullOrEmpty(BergamotModelsDirectory) || !Directory.Exists(BergamotModelsDirectory)
+            ? AppDomain.CurrentDomain.BaseDirectory
+            : BergamotModelsDirectory;
+
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            BergamotModelsDirectory = dialog.SelectedPath;
+            RefreshBergamotModels();
+        }
+    }
+
+    [RelayCommand]
+    private void RefreshBergamotModels()
+    {
+        var previousSelection = SelectedBergamotModel;
+        AvailableBergamotModels.Clear();
+
+        if (Directory.Exists(BergamotModelsDirectory))
+        {
+            var modelFolders = Directory
+                .EnumerateDirectories(BergamotModelsDirectory, "*", SearchOption.AllDirectories)
+                .Where(IsBergamotModelDirectory)
+                .OrderBy(path => Path.GetRelativePath(BergamotModelsDirectory, path), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var modelFolder in modelFolders)
+            {
+                AvailableBergamotModels.Add(GetBergamotModelDisplayName(modelFolder));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(BergamotModelPath))
+        {
+            var savedSelection = GetBergamotModelDisplayName(BergamotModelPath);
+            if (AvailableBergamotModels.Contains(savedSelection))
+            {
+                SelectedBergamotModel = savedSelection;
+                return;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(previousSelection) && AvailableBergamotModels.Contains(previousSelection))
+        {
+            SelectedBergamotModel = previousSelection;
+        }
+        else
+        {
+            SelectedBergamotModel = AvailableBergamotModels.FirstOrDefault();
+        }
+    }
+
+    [RelayCommand]
+    private void BrowseCTranslate2ModelPath()
+    {
+        using var dialog = new FolderBrowserDialog();
+        dialog.Description = "Select the CTranslate2 translation model folder";
+        dialog.InitialDirectory = string.IsNullOrEmpty(CTranslate2ModelPath) || !Directory.Exists(CTranslate2ModelPath)
+            ? AppDomain.CurrentDomain.BaseDirectory
+            : CTranslate2ModelPath;
+
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            CTranslate2ModelPath = dialog.SelectedPath;
+        }
+    }
+
+    [RelayCommand]
     private void StartRecordingShortcut()
     {
         IsRecordingShortcut = true;
@@ -247,6 +368,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         TesseractDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
         RefreshTesseractLanguages();
         GoogleVisionApiKey = string.Empty;
+        GoogleTranslationApiKey = string.Empty;
+        TranslationProvider = "Disabled";
+        BergamotModelsDirectory = string.Empty;
+        BergamotModelPath = string.Empty;
+        AvailableBergamotModels.Clear();
+        SelectedBergamotModel = null;
+        CTranslate2ModelPath = string.Empty;
         PaddleOcrModelPath = string.Empty;
         SourceLanguage = SelectedTesseractLanguage ?? "eng";
         TargetLanguage = "en-US";
@@ -299,6 +427,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             _settings.UseLocalTesseract = OcrProvider == "Tesseract";
             _settings.TesseractDataPath = TesseractDataPath;
             _settings.GoogleVisionApiKey = string.IsNullOrWhiteSpace(GoogleVisionApiKey) ? null : GoogleVisionApiKey;
+            _settings.GoogleTranslationApiKey = string.IsNullOrWhiteSpace(GoogleTranslationApiKey) ? null : GoogleTranslationApiKey;
+            _settings.TranslationProvider = TranslationProvider;
+            _settings.BergamotModelsDirectory = string.IsNullOrWhiteSpace(BergamotModelsDirectory) ? null : BergamotModelsDirectory;
+            _settings.BergamotModelPath = string.IsNullOrWhiteSpace(BergamotModelPath) ? null : BergamotModelPath;
+            _settings.CTranslate2ModelPath = string.IsNullOrWhiteSpace(CTranslate2ModelPath) ? null : CTranslate2ModelPath;
             _settings.PaddleOcrModelPath = string.IsNullOrWhiteSpace(PaddleOcrModelPath) ? null : PaddleOcrModelPath;
             _settings.SourceLanguage = SourceLanguage;
             _settings.TargetLanguage = TargetLanguage;
@@ -359,6 +492,59 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     partial void OnGoogleVisionApiKeyChanged(string value) => SaveIfReady();
 
+    partial void OnGoogleTranslationApiKeyChanged(string value) => SaveIfReady();
+
+    partial void OnTranslationProviderChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsTranslationEnabled));
+        OnPropertyChanged(nameof(IsBergamotTranslationProvider));
+        OnPropertyChanged(nameof(IsCTranslate2TranslationProvider));
+        OnPropertyChanged(nameof(IsGoogleApiTranslationProvider));
+        OnPropertyChanged(nameof(ShowsTranslationLanguageFields));
+        SaveIfReady();
+    }
+
+    partial void OnBergamotModelsDirectoryChanged(string value)
+    {
+        RefreshBergamotModels();
+        SaveIfReady();
+    }
+
+    partial void OnSelectedBergamotModelChanged(string? value)
+    {
+        OnPropertyChanged(nameof(SelectedBergamotLanguagePair));
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            BergamotModelPath = string.Empty;
+            return;
+        }
+
+        var modelPath = ResolveBergamotModelPath(value);
+        if (!string.IsNullOrWhiteSpace(modelPath) && BergamotModelPath != modelPath)
+        {
+            BergamotModelPath = modelPath;
+        }
+    }
+
+    partial void OnBergamotModelPathChanged(string value)
+    {
+        if (!_isInitializing && !string.IsNullOrWhiteSpace(value))
+        {
+            var displayName = GetBergamotModelDisplayName(value);
+            if (AvailableBergamotModels.Contains(displayName) && SelectedBergamotModel != displayName)
+            {
+                SelectedBergamotModel = displayName;
+            }
+        }
+
+        OnPropertyChanged(nameof(SelectedBergamotLanguagePair));
+
+        SaveIfReady();
+    }
+
+    partial void OnCTranslate2ModelPathChanged(string value) => SaveIfReady();
+
     partial void OnPaddleOcrModelPathChanged(string value) => SaveIfReady();
 
     partial void OnSourceLanguageChanged(string value)
@@ -394,6 +580,93 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         StatusMessage = Save()
             ? $"Saved at {DateTime.Now:T}"
             : "Failed to save settings.";
+    }
+
+    public string? ResolveSelectedBergamotModelPath()
+    {
+        if (!string.IsNullOrWhiteSpace(BergamotModelPath) && Directory.Exists(BergamotModelPath))
+        {
+            return BergamotModelPath;
+        }
+
+        return string.IsNullOrWhiteSpace(SelectedBergamotModel)
+            ? null
+            : ResolveBergamotModelPath(SelectedBergamotModel);
+    }
+
+    private string? ResolveBergamotModelPath(string displayName)
+    {
+        if (!Directory.Exists(BergamotModelsDirectory))
+        {
+            return null;
+        }
+
+        return Directory
+            .EnumerateDirectories(BergamotModelsDirectory, "*", SearchOption.AllDirectories)
+            .Where(IsBergamotModelDirectory)
+            .FirstOrDefault(path => string.Equals(
+                GetBergamotModelDisplayName(path),
+                displayName,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsBergamotModelDirectory(string directory)
+    {
+        return Directory.Exists(directory) &&
+               Directory.EnumerateFiles(directory, "model.*.bin", SearchOption.TopDirectoryOnly).Any() &&
+               Directory.EnumerateFiles(directory, "vocab.*.spm", SearchOption.TopDirectoryOnly).Any() &&
+               Directory.EnumerateFiles(directory, "lex.*.bin", SearchOption.TopDirectoryOnly).Any();
+    }
+
+    private string GetBergamotModelDisplayName(string modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+        {
+            return string.Empty;
+        }
+
+        if (Directory.Exists(BergamotModelsDirectory))
+        {
+            return Path.GetRelativePath(BergamotModelsDirectory, modelPath);
+        }
+
+        return Path.GetFileName(modelPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+    }
+
+    private static string ResolveDefaultBergamotModelsDirectory(string? modelPath)
+    {
+        if (!string.IsNullOrWhiteSpace(modelPath))
+        {
+            var parent = Directory.GetParent(modelPath);
+            if (parent != null)
+            {
+                return parent.FullName;
+            }
+        }
+
+        var localModelsDirectory = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "models", "bergamot"));
+        return Directory.Exists(localModelsDirectory) ? localModelsDirectory : string.Empty;
+    }
+
+    private static string? ExtractLanguagePair(string? modelName)
+    {
+        if (string.IsNullOrWhiteSpace(modelName))
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(modelName.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var parts = fileName.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length < 2)
+        {
+            return null;
+        }
+
+        var source = parts[0];
+        var target = parts[1];
+        return source.Length is >= 2 and <= 8 && target.Length is >= 2 and <= 8
+            ? $"{source} -> {target}"
+            : null;
     }
 
     private static string NormalizeShortcut(string shortcut)

@@ -70,6 +70,28 @@ public partial class SettingsView : Window
         e.Handled = true;
     }
 
+    private void OpenBergamotTest_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_settingsVm is null)
+            return;
+
+        var selectedModelPath = _settingsVm.ResolveSelectedBergamotModelPath();
+        if (string.IsNullOrWhiteSpace(selectedModelPath))
+        {
+            _settingsVm.StatusMessage = "Select a Bergamot model before testing.";
+            return;
+        }
+
+        if (_settingsVm.BergamotModelPath != selectedModelPath)
+        {
+            _settingsVm.BergamotModelPath = selectedModelPath;
+            _settingsVm.Save();
+        }
+
+        var testWindow = new BergamotTestWindow(selectedModelPath);
+        testWindow.Show(this);
+    }
+
     private static string FormatShortcut(Key key, KeyModifiers modifiers)
     {
         var parts = new System.Collections.Generic.List<string>();

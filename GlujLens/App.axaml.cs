@@ -36,7 +36,12 @@ public partial class App : Avalonia.Application
             // Configure services
             serviceCollection.AddSingleton<ITrayIconService, TrayIconService>();
             serviceCollection.AddSingleton<IScreenshotService, ScreenshotService>();
-            serviceCollection.AddSingleton<IOcrService, TesseractOcrService>();
+            serviceCollection.AddSingleton<TesseractOcrService>();
+            serviceCollection.AddSingleton<PaddleOcrService>();
+            serviceCollection.AddSingleton<GoogleVisionOcrService>();
+            serviceCollection.AddSingleton<IOcrService, ConfiguredOcrService>();
+            serviceCollection.AddSingleton<BergamotTranslationService>();
+            serviceCollection.AddSingleton<ITranslationService, ConfiguredTranslationService>();
             serviceCollection.AddSingleton<AppSettings>();
 
         // Add logging (minimal console logging for now)
@@ -101,6 +106,7 @@ public partial class App : Avalonia.Application
                 _trayIcon,
                 _services.GetRequiredService<IScreenshotService>(),
                 _services.GetRequiredService<IOcrService>(),
+                _services.GetRequiredService<ITranslationService>(),
                 _settings,
                 _services);
             _hotkeyService = new HotkeyService(_mainVm, _settings);

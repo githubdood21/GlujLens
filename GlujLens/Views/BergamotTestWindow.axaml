@@ -1,0 +1,49 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GlujLens.Views.BergamotTestWindow"
+        Width="720"
+        Height="520"
+        MinWidth="560"
+        MinHeight="420"
+        Title="Bergamot Translation Test"
+        WindowStartupLocation="CenterOwner">
+    <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="16">
+        <StackPanel Grid.Row="0" Spacing="5">
+            <TextBlock Text="Selected Model" FontSize="13"/>
+            <TextBox x:Name="ModelPathTextBox"
+                     IsReadOnly="True"
+                     TextWrapping="NoWrap"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Spacing="5" Margin="0,12,0,0">
+            <TextBlock Text="Input" FontSize="13"/>
+            <TextBox x:Name="InputTextBox"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     MinHeight="90"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Spacing="5" Margin="0,12,0,0">
+            <TextBlock Text="Output" FontSize="13"/>
+            <TextBox x:Name="OutputTextBox"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     IsReadOnly="True"
+                     MinHeight="140"/>
+        </StackPanel>
+
+        <Grid Grid.Row="3" ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+            <TextBlock x:Name="StatusTextBlock"
+                       Grid.Column="0"
+                       Text="Ready"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap"/>
+            <Button x:Name="TranslateButton"
+                    Grid.Column="1"
+                    Content="Translate"
+                    Margin="12,0,0,0"
+                    MinWidth="110"
+                    Click="OnTranslateClicked"/>
+        </Grid>
+    </Grid>
+</Window>

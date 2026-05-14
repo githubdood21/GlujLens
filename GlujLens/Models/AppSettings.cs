@@ -25,6 +25,10 @@ public class AppSettings : INotifyPropertyChanged
     private string? _paddleOcrModelPath;
     private string? _googleVisionApiKey;
     private string? _googleTranslationApiKey;
+    private string? _translationProvider;
+    private string? _bergamotModelsDirectory;
+    private string? _bergamotModelPath;
+    private string? _cTranslate2ModelPath;
     private string? _sourceLanguage;
     private string? _targetLanguage;
     private int _tesseractHorizontalMergeGap;
@@ -47,6 +51,10 @@ public class AppSettings : INotifyPropertyChanged
         _paddleOcrModelPath = null;
         _googleVisionApiKey = null;
         _googleTranslationApiKey = null;
+        _translationProvider = "Disabled";
+        _bergamotModelsDirectory = null;
+        _bergamotModelPath = null;
+        _cTranslate2ModelPath = null;
         _sourceLanguage = "en-US";
         _targetLanguage = "en-US";
         _tesseractHorizontalMergeGap = DefaultTesseractHorizontalMergeGap;
@@ -85,6 +93,10 @@ public class AppSettings : INotifyPropertyChanged
                 PaddleOcrModelPath = dto.PaddleOcrModelPath;
                 GoogleVisionApiKey = dto.GoogleVisionApiKey;
                 GoogleTranslationApiKey = dto.GoogleTranslationApiKey;
+                TranslationProvider = dto.TranslationProvider ?? "Disabled";
+                BergamotModelsDirectory = dto.BergamotModelsDirectory;
+                BergamotModelPath = dto.BergamotModelPath;
+                CTranslate2ModelPath = dto.CTranslate2ModelPath;
                 SourceLanguage = dto.SourceLanguage ?? "en-US";
                 TargetLanguage = dto.TargetLanguage ?? "en-US";
                 TesseractHorizontalMergeGap = dto.TesseractHorizontalMergeGap ?? DefaultTesseractHorizontalMergeGap;
@@ -136,6 +148,10 @@ public class AppSettings : INotifyPropertyChanged
             PaddleOcrModelPath = PaddleOcrModelPath,
             GoogleVisionApiKey = GoogleVisionApiKey,
             GoogleTranslationApiKey = GoogleTranslationApiKey,
+            TranslationProvider = TranslationProvider,
+            BergamotModelsDirectory = BergamotModelsDirectory,
+            BergamotModelPath = BergamotModelPath,
+            CTranslate2ModelPath = CTranslate2ModelPath,
             SourceLanguage = SourceLanguage,
             TargetLanguage = TargetLanguage,
             TesseractHorizontalMergeGap = TesseractHorizontalMergeGap,
@@ -162,6 +178,10 @@ public class AppSettings : INotifyPropertyChanged
             PaddleOcrModelPath = backup.PaddleOcrModelPath;
             GoogleVisionApiKey = backup.GoogleVisionApiKey;
             GoogleTranslationApiKey = backup.GoogleTranslationApiKey;
+            TranslationProvider = backup.TranslationProvider;
+            BergamotModelsDirectory = backup.BergamotModelsDirectory;
+            BergamotModelPath = backup.BergamotModelPath;
+            CTranslate2ModelPath = backup.CTranslate2ModelPath;
             SourceLanguage = backup.SourceLanguage;
             TargetLanguage = backup.TargetLanguage;
             TesseractHorizontalMergeGap = backup.TesseractHorizontalMergeGap ?? DefaultTesseractHorizontalMergeGap;
@@ -247,6 +267,30 @@ public class AppSettings : INotifyPropertyChanged
         set { _googleTranslationApiKey = value; OnPropertyChanged(); }
     }
 
+    public string? TranslationProvider
+    {
+        get => _translationProvider;
+        set { _translationProvider = value; OnPropertyChanged(); }
+    }
+
+    public string? BergamotModelsDirectory
+    {
+        get => _bergamotModelsDirectory;
+        set { _bergamotModelsDirectory = value; OnPropertyChanged(); }
+    }
+
+    public string? BergamotModelPath
+    {
+        get => _bergamotModelPath;
+        set { _bergamotModelPath = value; OnPropertyChanged(); }
+    }
+
+    public string? CTranslate2ModelPath
+    {
+        get => _cTranslate2ModelPath;
+        set { _cTranslate2ModelPath = value; OnPropertyChanged(); }
+    }
+
     public string? SourceLanguage
     {
         get => _sourceLanguage;
@@ -297,6 +341,10 @@ internal class SettingsDto
     public string? PaddleOcrModelPath { get; set; }
     public string? GoogleVisionApiKey { get; set; }
     public string? GoogleTranslationApiKey { get; set; }
+    public string? TranslationProvider { get; set; }
+    public string? BergamotModelsDirectory { get; set; }
+    public string? BergamotModelPath { get; set; }
+    public string? CTranslate2ModelPath { get; set; }
     public string? SourceLanguage { get; set; }
     public string? TargetLanguage { get; set; }
     public int? TesseractHorizontalMergeGap { get; set; }

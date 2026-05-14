@@ -191,7 +191,7 @@ public class TrayIconService : ITrayIconService
         menu.Items.Add(new ToolStripSeparator());
 
         // Screenshot Capture
-        var captureItem = new ToolStripMenuItem("📷 Capture Screenshot", null, (s, e) =>
+        var captureItem = new ToolStripMenuItem("Capture Screenshot", null, (s, e) =>
         {
             onMenuItemClicked?.Invoke("Capture");
         });
