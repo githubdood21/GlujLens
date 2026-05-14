@@ -151,4 +151,4 @@ dotnet publish GlujLens/GlujLens.csproj -c Release -r win-x64 --self-contained f
 
 ## License
 
-MIT
+Apache-2.0
