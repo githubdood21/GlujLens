@@ -7,6 +7,7 @@ using GlujLens.Services;
 using GlujLens.Views;
 using Microsoft.Extensions.DependencyInjection;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Windows.Forms;
 using DrawingBitmap = System.Drawing.Bitmap;
 using DrawingRectangle = System.Drawing.Rectangle;
@@ -591,12 +592,16 @@ public partial class MainViewModel : ObservableObject
 
         var provider = string.IsNullOrWhiteSpace(_settings.OcrProvider) ? "OCR" : _settings.OcrProvider;
         StatusText = $"Running {provider} OCR...";
+        var stopwatch = Stopwatch.StartNew();
         var ocrResult = await _ocrService.ExtractTextAsync(imageData);
+        stopwatch.Stop();
+        var elapsed = FormatElapsed(stopwatch.Elapsed);
+
         if (!ocrResult.Success)
         {
             ExtractedText = string.Empty;
             TextRegions.Clear();
-            StatusText = $"OCR failed: {ocrResult.ErrorMessage ?? "Unknown error"}";
+            StatusText = $"OCR failed after {elapsed}: {ocrResult.ErrorMessage ?? "Unknown error"}";
             return;
         }
 
@@ -610,8 +615,15 @@ public partial class MainViewModel : ObservableObject
         }
 
         StatusText = string.IsNullOrWhiteSpace(ExtractedText)
-            ? "Screenshot captured; OCR found no text"
-            : $"Screenshot captured; OCR extracted {TextRegions.Count} text regions";
+            ? $"Screenshot captured; OCR found no text in {elapsed}"
+            : $"Screenshot captured; OCR extracted {TextRegions.Count} text regions in {elapsed}";
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        return elapsed.TotalSeconds >= 1
+            ? $"{elapsed.TotalSeconds:0.0}s"
+            : $"{elapsed.TotalMilliseconds:0}ms";
     }
 
     private void ClearTranslatedRegions()

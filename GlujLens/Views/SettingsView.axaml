@@ -98,7 +98,7 @@
                                       ItemsSource="{Binding OcrProviderOptions}"
                                       Margin="0,5,0,0"
                                       MinWidth="200"/>
-                            <TextBlock Text="Tesseract and PaddleOCR run locally. Google Vision uses the Google Cloud Vision API."
+                            <TextBlock Text="Tesseract and ML.NET OCR run locally. Google Vision uses the Google Cloud Vision API."
                                        FontSize="11"
                                        Foreground="Gray"
                                        Margin="0,5,0,0"/>
@@ -106,7 +106,7 @@
 
                         <StackPanel IsVisible="{Binding IsTesseractProvider}">
                             <TextBlock Text="Tesseract tessdata Folder" FontSize="13"/>
-                            <TextBlock Text="Lower OCR quality, but lightweight and reliable. GlujLens runs it through one serialized local engine."
+                            <TextBlock Text="Default: models/ocr/tesseract/tessdata. Lightweight OCR through one serialized local engine."
                                        FontSize="11"
                                        Foreground="Gray"
                                        Margin="0,5,0,0"
@@ -166,23 +166,49 @@
                                      Margin="0,5,0,0"/>
                         </StackPanel>
 
-                        <StackPanel IsVisible="{Binding IsPaddleOcrProvider}">
-                            <TextBlock Text="PaddleOCR Model Folder" FontSize="13"/>
-                            <TextBlock Text="Better OCR quality for screenshots and dense UI text. CPU inference uses multithreading."
+                        <StackPanel IsVisible="{Binding IsMlNetOcrProvider}">
+                            <TextBlock Text="ML.NET OCR Model Folder" FontSize="13"/>
+                            <TextBlock Text="Default: models/ocr/mlnet. Use .onnx or ML.NET .zip OCR model artifacts."
                                        FontSize="11"
                                        Foreground="Gray"
                                        Margin="0,5,0,0"
                                        TextWrapping="Wrap"/>
-                            <TextBox Text="{Binding PaddleOcrModelPath, UpdateSourceTrigger=PropertyChanged}"
+                            <TextBox Text="{Binding MlNetOcrModelPath, UpdateSourceTrigger=PropertyChanged}"
                                      Margin="0,5,0,5"/>
-                            <Button Content="Browse"
-                                    Command="{Binding BrowsePaddleOcrModelPathCommand}"
-                                    MinWidth="80"
-                                        HorizontalAlignment="Left"/>
-                            <TextBlock Text="Leave empty to use the bundled CPU OCRv5 mobile models."
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Browse"
+                                        Command="{Binding BrowseMlNetOcrModelPathCommand}"
+                                        MinWidth="80"/>
+                                <Button Content="Refresh"
+                                        Command="{Binding RefreshMlNetOcrModelsCommand}"
+                                        MinWidth="80"/>
+                            </StackPanel>
+
+                            <TextBlock Text="ML.NET OCR Model"
+                                       FontSize="13"
+                                       Margin="0,10,0,0"/>
+                            <ComboBox SelectedItem="{Binding SelectedMlNetOcrModel}"
+                                      ItemsSource="{Binding AvailableMlNetOcrModels}"
+                                      Margin="0,5,0,0"
+                                      MinWidth="260"/>
+
+                            <TextBlock Text="Accelerator"
+                                       FontSize="13"
+                                       Margin="0,10,0,0"/>
+                            <ComboBox SelectedItem="{Binding MlNetOcrAccelerator}"
+                                      ItemsSource="{Binding MlNetOcrAcceleratorOptions}"
+                                      Margin="0,5,0,0"
+                                      MinWidth="160"/>
+                            <TextBlock Text="Auto tries DirectML first, then falls back to CPU."
                                        FontSize="11"
                                        Foreground="Gray"
-                                       Margin="0,5,0,0"/>
+                                       Margin="0,5,0,0"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding MlNetOcrAutoAcceleratorStatus}"
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,3,0,0"
+                                       TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Spacing="16">
@@ -218,7 +244,7 @@
                                       ItemsSource="{Binding TranslationProviderOptions}"
                                       Margin="0,5,0,0"
                                       MinWidth="200"/>
-                            <TextBlock Text="Bergamot and CTranslate2 are local providers. Google API sends text to Google Cloud Translation."
+                            <TextBlock Text="Bergamot and DirectML ONNX are local providers. Google API sends text to Google Cloud Translation."
                                        FontSize="11"
                                        Foreground="Gray"
                                        Margin="0,5,0,0"
@@ -228,7 +254,7 @@
                         <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowsTranslationLanguageFields}">
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Source Language" FontSize="13"/>
-                                <TextBox Text="{Binding SourceLanguage, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox Text="{Binding TranslationSourceLanguage, UpdateSourceTrigger=PropertyChanged}"
                                          Watermark="auto, ja, en, pl..."
                                          Margin="0,5,0,0"/>
                             </StackPanel>
@@ -243,7 +269,7 @@
 
                         <StackPanel IsVisible="{Binding IsBergamotTranslationProvider}">
                             <TextBlock Text="Bergamot Models Folder" FontSize="13"/>
-                            <TextBlock Text="Choose a folder containing downloaded Bergamot/Marian model folders. Then pick the language-pair model from the dropdown."
+                            <TextBlock Text="Default: models/translation/bergamot. Choose a folder containing downloaded Bergamot/Marian model folders."
                                        FontSize="11"
                                        Foreground="Gray"
                                        Margin="0,5,0,0"
@@ -282,17 +308,17 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <StackPanel IsVisible="{Binding IsCTranslate2TranslationProvider}">
-                            <TextBlock Text="CTranslate2 Model Folder" FontSize="13"/>
-                            <TextBlock Text="Local Transformer inference. Choose a converted CTranslate2 model folder and matching tokenizer files."
+                        <StackPanel IsVisible="{Binding IsDirectMlOnnxTranslationProvider}">
+                            <TextBlock Text="DirectML ONNX Model Folder" FontSize="13"/>
+                            <TextBlock Text="Default: models/translation/directml-onnx. Use exported ONNX translation models with matching tokenizer files."
                                        FontSize="11"
                                        Foreground="Gray"
                                        Margin="0,5,0,0"
                                        TextWrapping="Wrap"/>
-                            <TextBox Text="{Binding CTranslate2ModelPath, UpdateSourceTrigger=PropertyChanged}"
+                            <TextBox Text="{Binding DirectMlOnnxModelPath, UpdateSourceTrigger=PropertyChanged}"
                                      Margin="0,5,0,5"/>
                             <Button Content="Browse"
-                                    Command="{Binding BrowseCTranslate2ModelPathCommand}"
+                                    Command="{Binding BrowseDirectMlOnnxModelPathCommand}"
                                     MinWidth="80"
                                     HorizontalAlignment="Left"/>
                         </StackPanel>

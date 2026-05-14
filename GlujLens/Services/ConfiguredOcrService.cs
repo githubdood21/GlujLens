@@ -9,18 +9,18 @@ public sealed class ConfiguredOcrService : IOcrService
 {
     private readonly AppSettings _settings;
     private readonly TesseractOcrService _tesseractOcrService;
-    private readonly PaddleOcrService _paddleOcrService;
+    private readonly MlNetOcrService _mlNetOcrService;
     private readonly GoogleVisionOcrService _googleVisionOcrService;
 
     public ConfiguredOcrService(
         AppSettings settings,
         TesseractOcrService tesseractOcrService,
-        PaddleOcrService paddleOcrService,
+        MlNetOcrService mlNetOcrService,
         GoogleVisionOcrService googleVisionOcrService)
     {
         _settings = settings;
         _tesseractOcrService = tesseractOcrService;
-        _paddleOcrService = paddleOcrService;
+        _mlNetOcrService = mlNetOcrService;
         _googleVisionOcrService = googleVisionOcrService;
     }
 
@@ -39,9 +39,9 @@ public sealed class ConfiguredOcrService : IOcrService
             return _tesseractOcrService.ExtractTextAsync(imageData, cancellationToken);
         }
 
-        if (string.Equals(provider, "PaddleOCR", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(provider, "ML.NET OCR", StringComparison.OrdinalIgnoreCase))
         {
-            return _paddleOcrService.ExtractTextAsync(imageData, cancellationToken);
+            return _mlNetOcrService.ExtractTextAsync(imageData, cancellationToken);
         }
 
         if (string.Equals(provider, "Google Vision", StringComparison.OrdinalIgnoreCase))

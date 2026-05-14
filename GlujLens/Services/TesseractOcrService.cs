@@ -126,7 +126,7 @@ public class TesseractOcrService : IOcrService, IDisposable
     private string GetTessdataPath()
     {
         return string.IsNullOrWhiteSpace(_settings.TesseractDataPath)
-            ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata")
+            ? ModelStoragePaths.TesseractDirectory
             : _settings.TesseractDataPath;
     }
 

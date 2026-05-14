@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GlujLens.Models;
+using GlujLens.Services;
 
 namespace GlujLens.ViewModels;
 
@@ -30,20 +31,23 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         CopyToClipboardAfterCapture = settings.CopyToClipboardAfterCapture;
         ShowNotificationAfterCapture = settings.ShowNotificationAfterCapture;
         OcrProvider = settings.OcrProvider ?? "Tesseract";
-        TesseractDataPath = settings.TesseractDataPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
+        TesseractDataPath = settings.TesseractDataPath ?? ModelStoragePaths.TesseractDirectory;
         GoogleVisionApiKey = settings.GoogleVisionApiKey ?? string.Empty;
         GoogleTranslationApiKey = settings.GoogleTranslationApiKey ?? string.Empty;
         TranslationProvider = settings.TranslationProvider ?? "Disabled";
         BergamotModelsDirectory = settings.BergamotModelsDirectory
             ?? ResolveDefaultBergamotModelsDirectory(settings.BergamotModelPath);
         BergamotModelPath = settings.BergamotModelPath ?? string.Empty;
-        CTranslate2ModelPath = settings.CTranslate2ModelPath ?? string.Empty;
-        PaddleOcrModelPath = settings.PaddleOcrModelPath ?? string.Empty;
+        DirectMlOnnxModelPath = settings.DirectMlOnnxModelPath ?? ModelStoragePaths.DirectMlOnnxDirectory;
+        MlNetOcrModelPath = settings.MlNetOcrModelPath ?? ModelStoragePaths.MlNetOcrDirectory;
+        MlNetOcrAccelerator = settings.MlNetOcrAccelerator ?? "Auto";
         SourceLanguage = settings.SourceLanguage ?? "en-US";
+        TranslationSourceLanguage = settings.TranslationSourceLanguage ?? "auto";
         TargetLanguage = settings.TargetLanguage ?? "en-US";
         TesseractHorizontalMergeGap = settings.TesseractHorizontalMergeGap;
         TesseractVerticalMergeTolerance = settings.TesseractVerticalMergeTolerance;
         RefreshBergamotModels();
+        RefreshMlNetOcrModels();
         RefreshTesseractLanguages();
         StatusMessage = "Settings are saved automatically.";
         _isInitializing = false;
@@ -98,13 +102,22 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _bergamotModelPath;
 
     [ObservableProperty]
-    private string _cTranslate2ModelPath;
+    private string _directMlOnnxModelPath;
 
     [ObservableProperty]
-    private string _paddleOcrModelPath;
+    private string _mlNetOcrModelPath;
+
+    [ObservableProperty]
+    private string? _selectedMlNetOcrModel;
+
+    [ObservableProperty]
+    private string _mlNetOcrAccelerator;
 
     [ObservableProperty]
     private string _sourceLanguage;
+
+    [ObservableProperty]
+    private string _translationSourceLanguage;
 
     [ObservableProperty]
     private string? _selectedTesseractLanguage;
@@ -122,21 +135,23 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<string> AvailableBergamotModels { get; } = new();
 
+    public ObservableCollection<string> AvailableMlNetOcrModels { get; } = new();
+
     public bool IsTesseractProvider => OcrProvider == "Tesseract";
 
     public bool IsGoogleVisionProvider => OcrProvider == "Google Vision";
 
-    public bool IsPaddleOcrProvider => OcrProvider == "PaddleOCR";
+    public bool IsMlNetOcrProvider => OcrProvider == "ML.NET OCR";
 
     public bool IsTranslationEnabled => TranslationProvider != "Disabled";
 
     public bool IsBergamotTranslationProvider => TranslationProvider == "Bergamot";
 
-    public bool IsCTranslate2TranslationProvider => TranslationProvider == "CTranslate2";
+    public bool IsDirectMlOnnxTranslationProvider => TranslationProvider == "DirectML ONNX";
 
     public bool IsGoogleApiTranslationProvider => TranslationProvider == "Google API";
 
-    public bool ShowsTranslationLanguageFields => IsCTranslate2TranslationProvider || IsGoogleApiTranslationProvider;
+    public bool ShowsTranslationLanguageFields => IsDirectMlOnnxTranslationProvider || IsGoogleApiTranslationProvider;
 
     public string SelectedBergamotLanguagePair
     {
@@ -152,8 +167,20 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     public string[] ImageFormatOptions => new[] { "PNG", "JPEG", "BMP" };
     public int[] ImageQualityOptions => new[] { 10, 25, 50, 75, 90, 95, 100 };
-    public string[] OcrProviderOptions => new[] { "Disabled", "Tesseract", "Google Vision", "PaddleOCR" };
-    public string[] TranslationProviderOptions => new[] { "Disabled", "Bergamot", "CTranslate2", "Google API" };
+    public string[] OcrProviderOptions => new[] { "Disabled", "Tesseract", "ML.NET OCR", "Google Vision" };
+    public string[] MlNetOcrAcceleratorOptions => new[] { "Auto", "CPU", "DirectML" };
+    public string[] TranslationProviderOptions => new[] { "Disabled", "Bergamot", "DirectML ONNX", "Google API" };
+    public string MlNetOcrAutoAcceleratorStatus
+    {
+        get
+        {
+            var resolved = _settings.MlNetOcrAutoAccelerator;
+            var reason = _settings.MlNetOcrAutoAcceleratorReason;
+            return string.IsNullOrWhiteSpace(resolved)
+                ? "Auto benchmark has not run yet."
+                : $"Auto resolved to {resolved}. {reason}";
+        }
+    }
 
     public bool IsRecordingShortcut
     {
@@ -252,21 +279,59 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void BrowsePaddleOcrModelPath()
+    private void BrowseMlNetOcrModelPath()
     {
         using var dialog = new FolderBrowserDialog();
-        if (string.IsNullOrEmpty(PaddleOcrModelPath) || !Directory.Exists(PaddleOcrModelPath))
-        {
-            dialog.InitialDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        }
-        else
-        {
-            dialog.InitialDirectory = PaddleOcrModelPath;
-        }
+        dialog.Description = "Select the ML.NET OCR model folder";
+        dialog.InitialDirectory = string.IsNullOrEmpty(MlNetOcrModelPath) || !Directory.Exists(MlNetOcrModelPath)
+            ? ModelStoragePaths.MlNetOcrDirectory
+            : MlNetOcrModelPath;
 
         if (dialog.ShowDialog() == DialogResult.OK)
         {
-            PaddleOcrModelPath = dialog.SelectedPath;
+            MlNetOcrModelPath = dialog.SelectedPath;
+            RefreshMlNetOcrModels();
+        }
+    }
+
+    [RelayCommand]
+    private void RefreshMlNetOcrModels()
+    {
+        var previousSelection = SelectedMlNetOcrModel;
+        AvailableMlNetOcrModels.Clear();
+
+        var rootDirectory = ResolveMlNetOcrRootDirectory();
+        if (Directory.Exists(rootDirectory))
+        {
+            var modelPaths = ModelFolderScanner.FindModelEntries(
+                rootDirectory,
+                IsMlNetOcrModelPath,
+                SearchOption.TopDirectoryOnly,
+                includeFiles: true);
+
+            foreach (var modelPath in modelPaths)
+            {
+                AvailableMlNetOcrModels.Add(GetMlNetOcrModelDisplayName(modelPath, rootDirectory));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(MlNetOcrModelPath))
+        {
+            var savedSelection = GetMlNetOcrModelDisplayName(MlNetOcrModelPath, rootDirectory);
+            if (AvailableMlNetOcrModels.Contains(savedSelection))
+            {
+                SelectedMlNetOcrModel = savedSelection;
+                return;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(previousSelection) && AvailableMlNetOcrModels.Contains(previousSelection))
+        {
+            SelectedMlNetOcrModel = previousSelection;
+        }
+        else
+        {
+            SelectedMlNetOcrModel = AvailableMlNetOcrModels.FirstOrDefault();
         }
     }
 
@@ -276,7 +341,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         using var dialog = new FolderBrowserDialog();
         dialog.Description = "Select a folder containing Bergamot model folders";
         dialog.InitialDirectory = string.IsNullOrEmpty(BergamotModelsDirectory) || !Directory.Exists(BergamotModelsDirectory)
-            ? AppDomain.CurrentDomain.BaseDirectory
+            ? ModelStoragePaths.BergamotDirectory
             : BergamotModelsDirectory;
 
         if (dialog.ShowDialog() == DialogResult.OK)
@@ -294,11 +359,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
         if (Directory.Exists(BergamotModelsDirectory))
         {
-            var modelFolders = Directory
-                .EnumerateDirectories(BergamotModelsDirectory, "*", SearchOption.AllDirectories)
-                .Where(IsBergamotModelDirectory)
-                .OrderBy(path => Path.GetRelativePath(BergamotModelsDirectory, path), StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var modelFolders = ModelFolderScanner.FindModelEntries(
+                BergamotModelsDirectory,
+                IsBergamotModelDirectory,
+                SearchOption.AllDirectories);
 
             foreach (var modelFolder in modelFolders)
             {
@@ -327,17 +391,17 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void BrowseCTranslate2ModelPath()
+    private void BrowseDirectMlOnnxModelPath()
     {
         using var dialog = new FolderBrowserDialog();
-        dialog.Description = "Select the CTranslate2 translation model folder";
-        dialog.InitialDirectory = string.IsNullOrEmpty(CTranslate2ModelPath) || !Directory.Exists(CTranslate2ModelPath)
-            ? AppDomain.CurrentDomain.BaseDirectory
-            : CTranslate2ModelPath;
+        dialog.Description = "Select the DirectML ONNX translation model folder";
+        dialog.InitialDirectory = string.IsNullOrEmpty(DirectMlOnnxModelPath) || !Directory.Exists(DirectMlOnnxModelPath)
+            ? ModelStoragePaths.DirectMlOnnxDirectory
+            : DirectMlOnnxModelPath;
 
         if (dialog.ShowDialog() == DialogResult.OK)
         {
-            CTranslate2ModelPath = dialog.SelectedPath;
+            DirectMlOnnxModelPath = dialog.SelectedPath;
         }
     }
 
@@ -365,18 +429,21 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         CopyToClipboardAfterCapture = false;
         ShowNotificationAfterCapture = true;
         OcrProvider = "Tesseract";
-        TesseractDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
+        ModelStoragePaths.EnsureDefaultDirectories();
+        TesseractDataPath = ModelStoragePaths.TesseractDirectory;
         RefreshTesseractLanguages();
         GoogleVisionApiKey = string.Empty;
         GoogleTranslationApiKey = string.Empty;
         TranslationProvider = "Disabled";
-        BergamotModelsDirectory = string.Empty;
+        BergamotModelsDirectory = ModelStoragePaths.BergamotDirectory;
         BergamotModelPath = string.Empty;
         AvailableBergamotModels.Clear();
         SelectedBergamotModel = null;
-        CTranslate2ModelPath = string.Empty;
-        PaddleOcrModelPath = string.Empty;
+        DirectMlOnnxModelPath = ModelStoragePaths.DirectMlOnnxDirectory;
+        MlNetOcrModelPath = ModelStoragePaths.MlNetOcrDirectory;
+        MlNetOcrAccelerator = "Auto";
         SourceLanguage = SelectedTesseractLanguage ?? "eng";
+        TranslationSourceLanguage = "auto";
         TargetLanguage = "en-US";
         TesseractHorizontalMergeGap = AppSettings.DefaultTesseractHorizontalMergeGap;
         TesseractVerticalMergeTolerance = AppSettings.DefaultTesseractVerticalMergeTolerance;
@@ -429,11 +496,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             _settings.GoogleVisionApiKey = string.IsNullOrWhiteSpace(GoogleVisionApiKey) ? null : GoogleVisionApiKey;
             _settings.GoogleTranslationApiKey = string.IsNullOrWhiteSpace(GoogleTranslationApiKey) ? null : GoogleTranslationApiKey;
             _settings.TranslationProvider = TranslationProvider;
-            _settings.BergamotModelsDirectory = string.IsNullOrWhiteSpace(BergamotModelsDirectory) ? null : BergamotModelsDirectory;
+            _settings.BergamotModelsDirectory = string.IsNullOrWhiteSpace(BergamotModelsDirectory) ? ModelStoragePaths.BergamotDirectory : BergamotModelsDirectory;
             _settings.BergamotModelPath = string.IsNullOrWhiteSpace(BergamotModelPath) ? null : BergamotModelPath;
-            _settings.CTranslate2ModelPath = string.IsNullOrWhiteSpace(CTranslate2ModelPath) ? null : CTranslate2ModelPath;
-            _settings.PaddleOcrModelPath = string.IsNullOrWhiteSpace(PaddleOcrModelPath) ? null : PaddleOcrModelPath;
+            _settings.DirectMlOnnxModelPath = string.IsNullOrWhiteSpace(DirectMlOnnxModelPath) ? ModelStoragePaths.DirectMlOnnxDirectory : DirectMlOnnxModelPath;
+            _settings.MlNetOcrModelPath = string.IsNullOrWhiteSpace(MlNetOcrModelPath) ? ModelStoragePaths.MlNetOcrDirectory : MlNetOcrModelPath;
+            _settings.MlNetOcrAccelerator = MlNetOcrAccelerator;
             _settings.SourceLanguage = SourceLanguage;
+            _settings.TranslationSourceLanguage = string.IsNullOrWhiteSpace(TranslationSourceLanguage) ? "auto" : TranslationSourceLanguage;
             _settings.TargetLanguage = TargetLanguage;
             _settings.TesseractHorizontalMergeGap = TesseractHorizontalMergeGap;
             _settings.TesseractVerticalMergeTolerance = TesseractVerticalMergeTolerance;
@@ -480,7 +549,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(IsTesseractProvider));
         OnPropertyChanged(nameof(IsGoogleVisionProvider));
-        OnPropertyChanged(nameof(IsPaddleOcrProvider));
+        OnPropertyChanged(nameof(IsMlNetOcrProvider));
         SaveIfReady();
     }
 
@@ -498,7 +567,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(IsTranslationEnabled));
         OnPropertyChanged(nameof(IsBergamotTranslationProvider));
-        OnPropertyChanged(nameof(IsCTranslate2TranslationProvider));
+        OnPropertyChanged(nameof(IsDirectMlOnnxTranslationProvider));
         OnPropertyChanged(nameof(IsGoogleApiTranslationProvider));
         OnPropertyChanged(nameof(ShowsTranslationLanguageFields));
         SaveIfReady();
@@ -543,9 +612,40 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         SaveIfReady();
     }
 
-    partial void OnCTranslate2ModelPathChanged(string value) => SaveIfReady();
+    partial void OnDirectMlOnnxModelPathChanged(string value) => SaveIfReady();
 
-    partial void OnPaddleOcrModelPathChanged(string value) => SaveIfReady();
+    partial void OnMlNetOcrModelPathChanged(string value)
+    {
+        if (!_isInitializing && !string.IsNullOrWhiteSpace(value))
+        {
+            RefreshMlNetOcrModels();
+        }
+
+        SaveIfReady();
+        OnPropertyChanged(nameof(MlNetOcrAutoAcceleratorStatus));
+    }
+
+    partial void OnMlNetOcrAcceleratorChanged(string value)
+    {
+        SaveIfReady();
+        OnPropertyChanged(nameof(MlNetOcrAutoAcceleratorStatus));
+    }
+
+    partial void OnSelectedMlNetOcrModelChanged(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var modelPath = ResolveMlNetOcrModelPath(value);
+        if (!string.IsNullOrWhiteSpace(modelPath) && MlNetOcrModelPath != modelPath)
+        {
+            MlNetOcrModelPath = modelPath;
+        }
+    }
+
+    partial void OnTranslationSourceLanguageChanged(string value) => SaveIfReady();
 
     partial void OnSourceLanguageChanged(string value)
     {
@@ -610,6 +710,84 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
                 StringComparison.OrdinalIgnoreCase));
     }
 
+    private string ResolveMlNetOcrRootDirectory()
+    {
+        if (string.IsNullOrWhiteSpace(MlNetOcrModelPath))
+        {
+            return ModelStoragePaths.MlNetOcrDirectory;
+        }
+
+        if (File.Exists(MlNetOcrModelPath))
+        {
+            return Directory.GetParent(MlNetOcrModelPath)?.FullName ?? ModelStoragePaths.MlNetOcrDirectory;
+        }
+
+        if (Directory.Exists(MlNetOcrModelPath))
+        {
+            if (PathsEqual(MlNetOcrModelPath, ModelStoragePaths.MlNetOcrDirectory))
+            {
+                return MlNetOcrModelPath;
+            }
+
+            return IsMlNetOcrModelPath(MlNetOcrModelPath)
+                ? Directory.GetParent(MlNetOcrModelPath)?.FullName ?? ModelStoragePaths.MlNetOcrDirectory
+                : MlNetOcrModelPath;
+        }
+
+        return ModelStoragePaths.MlNetOcrDirectory;
+    }
+
+    private string? ResolveMlNetOcrModelPath(string displayName)
+    {
+        var rootDirectory = ResolveMlNetOcrRootDirectory();
+        if (!Directory.Exists(rootDirectory))
+        {
+            return null;
+        }
+
+        return ModelFolderScanner
+            .FindModelEntries(
+                rootDirectory,
+                IsMlNetOcrModelPath,
+                SearchOption.TopDirectoryOnly,
+                includeFiles: true)
+            .FirstOrDefault(path => string.Equals(
+                GetMlNetOcrModelDisplayName(path, rootDirectory),
+                displayName,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsMlNetOcrModelPath(string path)
+    {
+        if (File.Exists(path))
+        {
+            var extension = Path.GetExtension(path);
+            return extension.Equals(".onnx", StringComparison.OrdinalIgnoreCase) ||
+                   extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return Directory.Exists(path) &&
+               Directory.EnumerateFiles(path, "*.onnx", SearchOption.AllDirectories).Any();
+    }
+
+    private static string GetMlNetOcrModelDisplayName(string modelPath, string rootDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+        {
+            return string.Empty;
+        }
+
+        return ModelFolderScanner.GetDisplayName(rootDirectory, modelPath);
+    }
+
+    private static bool PathsEqual(string first, string second)
+    {
+        return string.Equals(
+            Path.GetFullPath(first),
+            Path.GetFullPath(second),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsBergamotModelDirectory(string directory)
     {
         return Directory.Exists(directory) &&
@@ -625,12 +803,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             return string.Empty;
         }
 
-        if (Directory.Exists(BergamotModelsDirectory))
-        {
-            return Path.GetRelativePath(BergamotModelsDirectory, modelPath);
-        }
-
-        return Path.GetFileName(modelPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return ModelFolderScanner.GetDisplayName(BergamotModelsDirectory, modelPath);
     }
 
     private static string ResolveDefaultBergamotModelsDirectory(string? modelPath)
@@ -644,8 +817,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             }
         }
 
-        var localModelsDirectory = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "models", "bergamot"));
-        return Directory.Exists(localModelsDirectory) ? localModelsDirectory : string.Empty;
+        return ModelStoragePaths.BergamotDirectory;
     }
 
     private static string? ExtractLanguagePair(string? modelName)

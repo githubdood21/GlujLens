@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using GlujLens.Services;
 
 namespace GlujLens.Models;
 
@@ -22,14 +23,19 @@ public class AppSettings : INotifyPropertyChanged
     private bool _useLocalTesseract;
     private string? _ocrProvider;
     private string? _tesseractDataPath;
-    private string? _paddleOcrModelPath;
+    private string? _mlNetOcrModelPath;
+    private string? _mlNetOcrAccelerator;
+    private string? _mlNetOcrAutoAccelerator;
+    private string? _mlNetOcrAutoAcceleratorSignature;
+    private string? _mlNetOcrAutoAcceleratorReason;
     private string? _googleVisionApiKey;
     private string? _googleTranslationApiKey;
     private string? _translationProvider;
     private string? _bergamotModelsDirectory;
     private string? _bergamotModelPath;
-    private string? _cTranslate2ModelPath;
+    private string? _directMlOnnxModelPath;
     private string? _sourceLanguage;
+    private string? _translationSourceLanguage;
     private string? _targetLanguage;
     private int _tesseractHorizontalMergeGap;
     private int _tesseractVerticalMergeTolerance;
@@ -37,6 +43,7 @@ public class AppSettings : INotifyPropertyChanged
     public AppSettings()
     {
         _settingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
+        ModelStoragePaths.EnsureDefaultDirectories();
         // Initialize with defaults - startup calls Load() once the app is ready.
         _defaultSaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
         _captureShortcut = "Alt+Ctrl+Q";
@@ -47,15 +54,20 @@ public class AppSettings : INotifyPropertyChanged
         _showNotificationAfterCapture = true;
         _useLocalTesseract = false;
         _ocrProvider = "Tesseract";
-        _tesseractDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
-        _paddleOcrModelPath = null;
+        _tesseractDataPath = ModelStoragePaths.TesseractDirectory;
+        _mlNetOcrModelPath = ModelStoragePaths.MlNetOcrDirectory;
+        _mlNetOcrAccelerator = "Auto";
+        _mlNetOcrAutoAccelerator = null;
+        _mlNetOcrAutoAcceleratorSignature = null;
+        _mlNetOcrAutoAcceleratorReason = null;
         _googleVisionApiKey = null;
         _googleTranslationApiKey = null;
         _translationProvider = "Disabled";
-        _bergamotModelsDirectory = null;
+        _bergamotModelsDirectory = ModelStoragePaths.BergamotDirectory;
         _bergamotModelPath = null;
-        _cTranslate2ModelPath = null;
+        _directMlOnnxModelPath = ModelStoragePaths.DirectMlOnnxDirectory;
         _sourceLanguage = "en-US";
+        _translationSourceLanguage = "auto";
         _targetLanguage = "en-US";
         _tesseractHorizontalMergeGap = DefaultTesseractHorizontalMergeGap;
         _tesseractVerticalMergeTolerance = DefaultTesseractVerticalMergeTolerance;
@@ -66,6 +78,8 @@ public class AppSettings : INotifyPropertyChanged
     /// </summary>
     public void Load()
     {
+        ModelStoragePaths.EnsureDefaultDirectories();
+
         if (!File.Exists(_settingsFilePath))
         {
             Save(); // Create file with defaults
@@ -88,16 +102,21 @@ public class AppSettings : INotifyPropertyChanged
                 CopyToClipboardAfterCapture = dto.CopyToClipboardAfterCapture ?? false;
                 ShowNotificationAfterCapture = dto.ShowNotificationAfterCapture ?? true;
                 UseLocalTesseract = dto.UseLocalTesseract ?? false;
-                OcrProvider = dto.OcrProvider ?? "Tesseract";
-                TesseractDataPath = dto.TesseractDataPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
-                PaddleOcrModelPath = dto.PaddleOcrModelPath;
+                OcrProvider = NormalizeOcrProvider(dto.OcrProvider);
+                TesseractDataPath = NormalizeTesseractDataPath(dto.TesseractDataPath);
+                MlNetOcrModelPath = dto.MlNetOcrModelPath ?? ModelStoragePaths.MlNetOcrDirectory;
+                MlNetOcrAccelerator = NormalizeAccelerator(dto.MlNetOcrAccelerator);
+                MlNetOcrAutoAccelerator = NormalizeCachedAccelerator(dto.MlNetOcrAutoAccelerator);
+                MlNetOcrAutoAcceleratorSignature = dto.MlNetOcrAutoAcceleratorSignature;
+                MlNetOcrAutoAcceleratorReason = dto.MlNetOcrAutoAcceleratorReason;
                 GoogleVisionApiKey = dto.GoogleVisionApiKey;
                 GoogleTranslationApiKey = dto.GoogleTranslationApiKey;
-                TranslationProvider = dto.TranslationProvider ?? "Disabled";
-                BergamotModelsDirectory = dto.BergamotModelsDirectory;
+                TranslationProvider = NormalizeTranslationProvider(dto.TranslationProvider);
+                BergamotModelsDirectory = NormalizeBergamotModelsDirectory(dto.BergamotModelsDirectory);
                 BergamotModelPath = dto.BergamotModelPath;
-                CTranslate2ModelPath = dto.CTranslate2ModelPath;
+                DirectMlOnnxModelPath = dto.DirectMlOnnxModelPath ?? ModelStoragePaths.DirectMlOnnxDirectory;
                 SourceLanguage = dto.SourceLanguage ?? "en-US";
+                TranslationSourceLanguage = dto.TranslationSourceLanguage ?? "auto";
                 TargetLanguage = dto.TargetLanguage ?? "en-US";
                 TesseractHorizontalMergeGap = dto.TesseractHorizontalMergeGap ?? DefaultTesseractHorizontalMergeGap;
                 TesseractVerticalMergeTolerance = dto.TesseractVerticalMergeTolerance ?? DefaultTesseractVerticalMergeTolerance;
@@ -145,14 +164,19 @@ public class AppSettings : INotifyPropertyChanged
             UseLocalTesseract = UseLocalTesseract,
             OcrProvider = OcrProvider,
             TesseractDataPath = TesseractDataPath,
-            PaddleOcrModelPath = PaddleOcrModelPath,
+            MlNetOcrModelPath = MlNetOcrModelPath,
+            MlNetOcrAccelerator = MlNetOcrAccelerator,
+            MlNetOcrAutoAccelerator = MlNetOcrAutoAccelerator,
+            MlNetOcrAutoAcceleratorSignature = MlNetOcrAutoAcceleratorSignature,
+            MlNetOcrAutoAcceleratorReason = MlNetOcrAutoAcceleratorReason,
             GoogleVisionApiKey = GoogleVisionApiKey,
             GoogleTranslationApiKey = GoogleTranslationApiKey,
             TranslationProvider = TranslationProvider,
             BergamotModelsDirectory = BergamotModelsDirectory,
             BergamotModelPath = BergamotModelPath,
-            CTranslate2ModelPath = CTranslate2ModelPath,
+            DirectMlOnnxModelPath = DirectMlOnnxModelPath,
             SourceLanguage = SourceLanguage,
+            TranslationSourceLanguage = TranslationSourceLanguage,
             TargetLanguage = TargetLanguage,
             TesseractHorizontalMergeGap = TesseractHorizontalMergeGap,
             TesseractVerticalMergeTolerance = TesseractVerticalMergeTolerance
@@ -175,14 +199,19 @@ public class AppSettings : INotifyPropertyChanged
             UseLocalTesseract = backup.UseLocalTesseract ?? false;
             OcrProvider = backup.OcrProvider;
             TesseractDataPath = backup.TesseractDataPath;
-            PaddleOcrModelPath = backup.PaddleOcrModelPath;
+            MlNetOcrModelPath = backup.MlNetOcrModelPath;
+            MlNetOcrAccelerator = backup.MlNetOcrAccelerator;
+            MlNetOcrAutoAccelerator = backup.MlNetOcrAutoAccelerator;
+            MlNetOcrAutoAcceleratorSignature = backup.MlNetOcrAutoAcceleratorSignature;
+            MlNetOcrAutoAcceleratorReason = backup.MlNetOcrAutoAcceleratorReason;
             GoogleVisionApiKey = backup.GoogleVisionApiKey;
             GoogleTranslationApiKey = backup.GoogleTranslationApiKey;
             TranslationProvider = backup.TranslationProvider;
             BergamotModelsDirectory = backup.BergamotModelsDirectory;
             BergamotModelPath = backup.BergamotModelPath;
-            CTranslate2ModelPath = backup.CTranslate2ModelPath;
+            DirectMlOnnxModelPath = backup.DirectMlOnnxModelPath;
             SourceLanguage = backup.SourceLanguage;
+            TranslationSourceLanguage = backup.TranslationSourceLanguage;
             TargetLanguage = backup.TargetLanguage;
             TesseractHorizontalMergeGap = backup.TesseractHorizontalMergeGap ?? DefaultTesseractHorizontalMergeGap;
             TesseractVerticalMergeTolerance = backup.TesseractVerticalMergeTolerance ?? DefaultTesseractVerticalMergeTolerance;
@@ -249,10 +278,34 @@ public class AppSettings : INotifyPropertyChanged
         set { _tesseractDataPath = value; OnPropertyChanged(); }
     }
 
-    public string? PaddleOcrModelPath
+    public string? MlNetOcrModelPath
     {
-        get => _paddleOcrModelPath;
-        set { _paddleOcrModelPath = value; OnPropertyChanged(); }
+        get => _mlNetOcrModelPath;
+        set { _mlNetOcrModelPath = value; OnPropertyChanged(); }
+    }
+
+    public string? MlNetOcrAccelerator
+    {
+        get => _mlNetOcrAccelerator;
+        set { _mlNetOcrAccelerator = NormalizeAccelerator(value); OnPropertyChanged(); }
+    }
+
+    public string? MlNetOcrAutoAccelerator
+    {
+        get => _mlNetOcrAutoAccelerator;
+        set { _mlNetOcrAutoAccelerator = NormalizeCachedAccelerator(value); OnPropertyChanged(); }
+    }
+
+    public string? MlNetOcrAutoAcceleratorSignature
+    {
+        get => _mlNetOcrAutoAcceleratorSignature;
+        set { _mlNetOcrAutoAcceleratorSignature = value; OnPropertyChanged(); }
+    }
+
+    public string? MlNetOcrAutoAcceleratorReason
+    {
+        get => _mlNetOcrAutoAcceleratorReason;
+        set { _mlNetOcrAutoAcceleratorReason = value; OnPropertyChanged(); }
     }
 
     public string? GoogleVisionApiKey
@@ -285,16 +338,22 @@ public class AppSettings : INotifyPropertyChanged
         set { _bergamotModelPath = value; OnPropertyChanged(); }
     }
 
-    public string? CTranslate2ModelPath
+    public string? DirectMlOnnxModelPath
     {
-        get => _cTranslate2ModelPath;
-        set { _cTranslate2ModelPath = value; OnPropertyChanged(); }
+        get => _directMlOnnxModelPath;
+        set { _directMlOnnxModelPath = value; OnPropertyChanged(); }
     }
 
     public string? SourceLanguage
     {
         get => _sourceLanguage;
         set { _sourceLanguage = value; OnPropertyChanged(); }
+    }
+
+    public string? TranslationSourceLanguage
+    {
+        get => _translationSourceLanguage;
+        set { _translationSourceLanguage = value; OnPropertyChanged(); }
     }
 
     public string? TargetLanguage
@@ -321,6 +380,90 @@ public class AppSettings : INotifyPropertyChanged
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
+
+    private static string NormalizeTranslationProvider(string? provider)
+    {
+        return provider?.Trim() switch
+        {
+            "CTranslate2" => "DirectML ONNX",
+            { Length: > 0 } value => value,
+            _ => "Disabled"
+        };
+    }
+
+    private static string NormalizeOcrProvider(string? provider)
+    {
+        return provider?.Trim() switch
+        {
+            "PaddleOCR" => "ML.NET OCR",
+            { Length: > 0 } value => value,
+            _ => "Tesseract"
+        };
+    }
+
+    private static string NormalizeAccelerator(string? accelerator)
+    {
+        return accelerator?.Trim() switch
+        {
+            "CPU" => "CPU",
+            "DirectML" => "DirectML",
+            "GPU" => "DirectML",
+            _ => "Auto"
+        };
+    }
+
+    private static string? NormalizeCachedAccelerator(string? accelerator)
+    {
+        return accelerator?.Trim() switch
+        {
+            "CPU" => "CPU",
+            "DirectML" => "DirectML",
+            "GPU" => "DirectML",
+            _ => null
+        };
+    }
+
+    private static string NormalizeTesseractDataPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return ModelStoragePaths.TesseractDirectory;
+        }
+
+        var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
+        return PathsEqual(path, legacyPath)
+            ? ModelStoragePaths.TesseractDirectory
+            : path;
+    }
+
+    private static string NormalizeBergamotModelsDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return ModelStoragePaths.BergamotDirectory;
+        }
+
+        var legacyRepoPath = Path.GetFullPath(Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "models",
+            "bergamot"));
+
+        return PathsEqual(path, legacyRepoPath)
+            ? ModelStoragePaths.BergamotDirectory
+            : path;
+    }
+
+    private static bool PathsEqual(string first, string second)
+    {
+        return string.Equals(
+            Path.GetFullPath(first.Trim()),
+            Path.GetFullPath(second.Trim()),
+            StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>
@@ -338,14 +481,19 @@ internal class SettingsDto
     public bool? UseLocalTesseract { get; set; }
     public string? OcrProvider { get; set; }
     public string? TesseractDataPath { get; set; }
-    public string? PaddleOcrModelPath { get; set; }
+    public string? MlNetOcrModelPath { get; set; }
+    public string? MlNetOcrAccelerator { get; set; }
+    public string? MlNetOcrAutoAccelerator { get; set; }
+    public string? MlNetOcrAutoAcceleratorSignature { get; set; }
+    public string? MlNetOcrAutoAcceleratorReason { get; set; }
     public string? GoogleVisionApiKey { get; set; }
     public string? GoogleTranslationApiKey { get; set; }
     public string? TranslationProvider { get; set; }
     public string? BergamotModelsDirectory { get; set; }
     public string? BergamotModelPath { get; set; }
-    public string? CTranslate2ModelPath { get; set; }
+    public string? DirectMlOnnxModelPath { get; set; }
     public string? SourceLanguage { get; set; }
+    public string? TranslationSourceLanguage { get; set; }
     public string? TargetLanguage { get; set; }
     public int? TesseractHorizontalMergeGap { get; set; }
     public int? TesseractVerticalMergeTolerance { get; set; }

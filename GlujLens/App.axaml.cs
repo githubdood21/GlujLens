@@ -37,7 +37,12 @@ public partial class App : Avalonia.Application
             serviceCollection.AddSingleton<ITrayIconService, TrayIconService>();
             serviceCollection.AddSingleton<IScreenshotService, ScreenshotService>();
             serviceCollection.AddSingleton<TesseractOcrService>();
-            serviceCollection.AddSingleton<PaddleOcrService>();
+            serviceCollection.AddSingleton<MlNetOcrModelCatalog>();
+            serviceCollection.AddSingleton<OnnxRuntimeSessionFactory>();
+            serviceCollection.AddSingleton<GpuHardwareDetector>();
+            serviceCollection.AddSingleton<MlNetOcrAutoAcceleratorService>();
+            serviceCollection.AddSingleton<PaddleOnnxOcrRunner>();
+            serviceCollection.AddSingleton<MlNetOcrService>();
             serviceCollection.AddSingleton<GoogleVisionOcrService>();
             serviceCollection.AddSingleton<IOcrService, ConfiguredOcrService>();
             serviceCollection.AddSingleton<BergamotTranslationService>();
@@ -71,6 +76,18 @@ public partial class App : Avalonia.Application
             _trayIcon = _services.GetRequiredService<ITrayIconService>();
             _settings = _services.GetRequiredService<AppSettings>();
             _settings.Load();
+            Task.Run(() =>
+            {
+                try
+                {
+                    _services.GetRequiredService<MlNetOcrAutoAcceleratorService>()
+                        .EnsureAutoAccelerator();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ML.NET OCR Auto accelerator setup failed: {ex.Message}");
+                }
+            });
 
             // Create context menu - uses ShowMainWindow method directly
             var contextMenu = TrayIconService.CreateContextMenu(menuItemName =>
