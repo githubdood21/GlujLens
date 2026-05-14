@@ -11,13 +11,19 @@ namespace GlujLens.Services;
 /// </summary>
 public class HotkeyService : IDisposable
 {
+    private const int LongPressMilliseconds = 3000;
+    private const int KeyPollMilliseconds = 50;
+
     private readonly WeakReference _mainViewModelRef;
     private readonly AppSettings _settings;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly int _hotkeyId = 0xA000;
     private readonly HashSet<int> _registeredHotkeyIds = new();
     private bool _isDisposed;
+    private bool _isHandlingHotkey;
     private DateTime _lastTriggerTime = DateTime.MinValue;
+    private uint _registeredModifiers;
+    private uint _registeredVirtualKey;
 
     public HotkeyService(object mainViewModel, AppSettings settings)
     {
@@ -52,6 +58,8 @@ public class HotkeyService : IDisposable
         }
 
         _registeredHotkeyIds.Add(_hotkeyId);
+        _registeredModifiers = modifiers;
+        _registeredVirtualKey = virtualKey;
         System.Diagnostics.Debug.WriteLine($"[HotkeyService] RegisterHotKey succeeded for shortcut: {shortcut} (MOD=0x{modifiers:X2}, VK=0x{virtualKey:X2})");
         return true;
     }
@@ -74,6 +82,8 @@ public class HotkeyService : IDisposable
         }
 
         _registeredHotkeyIds.Clear();
+        _registeredModifiers = 0;
+        _registeredVirtualKey = 0;
     }
 
     /// <summary>
@@ -86,15 +96,61 @@ public class HotkeyService : IDisposable
             return;
 
         _lastTriggerTime = now;
+        if (_isHandlingHotkey)
+            return;
 
+        _isHandlingHotkey = true;
+        _ = HandleHotkeyPressAsync();
+    }
+
+    private async Task HandleHotkeyPressAsync()
+    {
+        try
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(LongPressMilliseconds);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!IsRegisteredHotkeyDown())
+                {
+                    ExecuteCapture(captureAllDisplays: false);
+                    return;
+                }
+
+                await Task.Delay(KeyPollMilliseconds).ConfigureAwait(false);
+            }
+
+            ExecuteCapture(captureAllDisplays: true);
+
+            while (IsRegisteredHotkeyDown())
+            {
+                await Task.Delay(KeyPollMilliseconds).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Hotkey trigger error: {ex.Message}");
+        }
+        finally
+        {
+            _lastTriggerTime = DateTime.Now;
+            _isHandlingHotkey = false;
+        }
+    }
+
+    private void ExecuteCapture(bool captureAllDisplays)
+    {
         var vm = _mainViewModelRef.Target;
         if (vm is MainViewModel mainVm)
         {
             try
             {
-                if (mainVm.CaptureCommand.CanExecute(null))
+                var command = captureAllDisplays
+                    ? mainVm.CaptureAllDisplaysCommand
+                    : mainVm.CaptureCommand;
+
+                if (command.CanExecute(null))
                 {
-                    mainVm.CaptureCommand.Execute(null);
+                    command.Execute(null);
                 }
             }
             catch (Exception ex)
@@ -102,6 +158,33 @@ public class HotkeyService : IDisposable
                 System.Diagnostics.Debug.WriteLine($"Hotkey trigger error: {ex.Message}");
             }
         }
+    }
+
+    private bool IsRegisteredHotkeyDown()
+    {
+        if (_registeredVirtualKey == 0)
+            return false;
+
+        if ((_registeredModifiers & User32.MOD_ALT) != 0 && !IsVirtualKeyDown(User32.VK_MENU))
+            return false;
+
+        if ((_registeredModifiers & User32.MOD_CONTROL) != 0 && !IsVirtualKeyDown(User32.VK_CONTROL))
+            return false;
+
+        if ((_registeredModifiers & User32.MOD_SHIFT) != 0 && !IsVirtualKeyDown(User32.VK_SHIFT))
+            return false;
+
+        if ((_registeredModifiers & User32.MOD_WIN) != 0 &&
+            !IsVirtualKeyDown(User32.VK_LWIN) &&
+            !IsVirtualKeyDown(User32.VK_RWIN))
+            return false;
+
+        return IsVirtualKeyDown(_registeredVirtualKey);
+    }
+
+    private static bool IsVirtualKeyDown(uint virtualKey)
+    {
+        return (User32.GetAsyncKeyState((int)virtualKey) & 0x8000) != 0;
     }
 
     public bool RefreshHotkey()
@@ -201,12 +284,20 @@ public class HotkeyService : IDisposable
         public const uint MOD_CONTROL = 0x0002;
         public const uint MOD_SHIFT = 0x0004;
         public const uint MOD_WIN = 0x0008;
+        public const uint VK_SHIFT = 0x10;
+        public const uint VK_CONTROL = 0x11;
+        public const uint VK_MENU = 0x12;
+        public const uint VK_LWIN = 0x5B;
+        public const uint VK_RWIN = 0x5C;
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint ldvk);
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int vKey);
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr CreateWindowEx(int dwExStyle, string lpClassName, string lpWindowName, int dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);

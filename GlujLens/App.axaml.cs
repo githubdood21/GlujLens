@@ -33,10 +33,11 @@ public partial class App : Avalonia.Application
     {
         var serviceCollection = new ServiceCollection();
 
-        // Configure services
-        serviceCollection.AddSingleton<ITrayIconService, TrayIconService>();
-        serviceCollection.AddSingleton<IScreenshotService, ScreenshotService>();
-        serviceCollection.AddSingleton<AppSettings>();
+            // Configure services
+            serviceCollection.AddSingleton<ITrayIconService, TrayIconService>();
+            serviceCollection.AddSingleton<IScreenshotService, ScreenshotService>();
+            serviceCollection.AddSingleton<IOcrService, TesseractOcrService>();
+            serviceCollection.AddSingleton<AppSettings>();
 
         // Add logging (minimal console logging for now)
         serviceCollection.AddLogging(builder =>
@@ -96,7 +97,12 @@ public partial class App : Avalonia.Application
 
             // Create MainViewModel and register HotkeyService at app startup
             // This ensures hotkeys work immediately without needing to open the main window
-            _mainVm = new MainViewModel(_trayIcon, _services.GetRequiredService<IScreenshotService>(), _settings, _services);
+            _mainVm = new MainViewModel(
+                _trayIcon,
+                _services.GetRequiredService<IScreenshotService>(),
+                _services.GetRequiredService<IOcrService>(),
+                _settings,
+                _services);
             _hotkeyService = new HotkeyService(_mainVm, _settings);
             _mainVm.SetHotkeyService(_hotkeyService);
             _hotkeyService.RegisterHotkey();

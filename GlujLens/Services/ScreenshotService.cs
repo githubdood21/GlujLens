@@ -22,7 +22,7 @@ public class ScreenshotService : IScreenshotService
     {
         try
         {
-            var bounds = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+            var bounds = GetScreenBoundsAtCursor();
             using var bitmap = new Bitmap(bounds.Width, bounds.Height);
             using var graphics = Graphics.FromImage(bitmap);
             graphics.CopyFromScreen(bounds.Location, Point.Empty, bitmap.Size);
@@ -39,6 +39,51 @@ public class ScreenshotService : IScreenshotService
                 ErrorMessage = ex.Message
             };
         }
+    }
+
+    public async Task<CaptureResult> CaptureAllDisplaysAsync()
+    {
+        try
+        {
+            var bounds = GetAllDisplayBounds();
+            using var bitmap = new Bitmap(bounds.Width, bounds.Height);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.CopyFromScreen(bounds.Location, Point.Empty, bitmap.Size);
+
+            var result = await ConvertToCaptureResultAsync(bitmap);
+            result.Success = true;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return new CaptureResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+        }
+    }
+
+    private static Rectangle GetScreenBoundsAtCursor()
+    {
+        var cursorPosition = Cursor.Position;
+        var screen = Screen.FromPoint(cursorPosition);
+        return screen?.Bounds ?? Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
+    }
+
+    private static Rectangle GetAllDisplayBounds()
+    {
+        var screens = Screen.AllScreens;
+        if (screens.Length == 0)
+            return SystemInformation.VirtualScreen;
+
+        var bounds = screens[0].Bounds;
+        foreach (var screen in screens.Skip(1))
+        {
+            bounds = Rectangle.Union(bounds, screen.Bounds);
+        }
+
+        return bounds;
     }
 
     public async Task<CaptureResult> CaptureRegionAsync(int x, int y, int width, int height)

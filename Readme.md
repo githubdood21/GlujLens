@@ -1,116 +1,124 @@
 # GlujLens
 
-GlujLens is a modern .NET 9 desktop application for text extraction and translation from screenshots. It leverages Avalonia UI for cross-platform compatibility, Microsoft ML.NET for OCR, and Windows Forms NotifyIcon for system tray integration.
+GlujLens is a Windows desktop screenshot utility for capturing screens, running local OCR, and selecting extracted text directly from the screenshot preview. It uses Avalonia for the UI, a Windows tray icon for background use, and Tesseract for OCR.
 
-## Features
+## Current Features
 
-- **Screenshot Capture**: Capture screen regions for text extraction
-- **Multi-language OCR**: Extract text in English, German, Russian, Japanese, and more using Microsoft ML.NET
-- **Translation**: Translate extracted text to target languages
-- **System Tray Icon**: Background-only startup with tray icon and context menu
-- **Settings Management**: Configurable via `appsettings.json`
-- **Multi-language Support**: Configurable source and target languages
+- **Tray-first workflow**: GlujLens can run in the background with a tray icon and context menu.
+- **Configurable global hotkey**: Record a capture shortcut from Settings.
+- **Mouse-aware monitor capture**: A normal capture grabs the display that currently contains the mouse cursor.
+- **All-display long press**: Hold the capture hotkey for 3 seconds to capture all active displays as one image, preserving their virtual desktop positions.
+- **Screenshot preview**: Captured images are shown in the main window with capture dimensions and elapsed capture time.
+- **Save and clipboard actions**: Save screenshots to the configured directory or copy the latest screenshot to the clipboard.
+- **Local Tesseract OCR**: Run OCR on the latest screenshot using `.traineddata` files from the configured tessdata folder.
+- **OCR text overlays**: Detected text regions are highlighted on top of the screenshot; clicking a highlight selects and copies that text.
+- **Phrase merging controls**: Tune Tesseract horizontal word gap and vertical line tolerance from Settings.
+- **Automatic settings persistence**: Settings are saved to `settings.json` in the app output folder.
+
+## OCR Notes
+
+The implemented OCR provider is Tesseract. Google Vision and PaddleOCR appear as placeholders in Settings, but they are not implemented yet.
+
+Tesseract runs through the `Tesseract` NuGet package and native `tesseract50.dll` / `leptonica-1.82.0.dll` binaries. GlujLens caches the Tesseract engine between OCR runs and sets OpenMP thread-count hints at startup. GPU acceleration is not currently used.
+
+Language data is discovered from the configured tessdata folder by scanning for `*.traineddata` files. Exact traineddata names such as `eng_std` are supported.
+
+## Hotkey Behavior
+
+- **Short press**: Capture the monitor under the mouse cursor.
+- **Hold for 3 seconds**: Capture all active monitors into one virtual-desktop image.
+
+Default shortcut:
+
+```text
+Alt+Ctrl+Q
+```
+
+You can change it in `Settings > Capture`.
+
+## Settings
+
+Settings are available from the main window or tray menu. Key options include:
+
+- Default save directory
+- Image format and quality
+- Capture shortcut
+- Copy to clipboard after capture
+- Show notification after capture
+- OCR provider
+- Tesseract tessdata folder
+- Tesseract language data
+- Tesseract text merge controls
+- Target language placeholder
+
+The settings file is written to:
+
+```text
+GlujLens/bin/<configuration>/<target-framework>/settings.json
+```
 
 ## Technology Stack
 
-- **.NET 9.0** - Latest LTS runtime
-- **Avalonia UI 11.2** - Cross-platform desktop UI framework
-- **CommunityToolkit.Mvvm** - MVVM framework with source generators
-- **Microsoft.Extensions.DependencyInjection** - Built-in DI container
-- **System.Windows.Forms (NotifyIcon)** - System tray icon support
-- **SkiaSharp** - Graphics rendering
-- **Microsoft ML.NET** - Machine learning for OCR
-- **System.Drawing.Common** - GDI+ imaging support
+- **.NET 9**
+- **Avalonia UI 11**
+- **CommunityToolkit.Mvvm**
+- **Microsoft.Extensions.DependencyInjection**
+- **System.Windows.Forms NotifyIcon**
+- **System.Drawing / GDI screen capture**
+- **Tesseract 5.2.0 NuGet package**
+- **SkiaSharp**
 
 ## Project Structure
 
-```
+```text
 GlujLens/
-├── Models/
-│   ├── AppSettings.cs          # Application configuration model
-│   ├── CaptureResult.cs        # Screenshot capture result model
-│   ├── TextRegion.cs           # Text region model
-│   └── DetectedObject.cs       # Detected object model
-├── ViewModels/
-│   ├── MainViewModel.cs        # Main application view model
-│   ├── CaptureViewModel.cs     # Screenshot capture view model
-│   ├── EditorViewModel.cs      # Text editing view model
-│   └── SettingsViewModel.cs    # Settings view model
-├── Views/
-│   ├── MainWindow.axaml        # Main window XAML markup
-│   └── MainWindow.axaml.cs     # Main window code-behind
-├── Services/
-│   ├── IScreenshotService.cs   # Screenshot service interface
-│   ├── ScreenshotService.cs    # Screenshot capture implementation
-│   ├── ITrayIconService.cs     # Tray icon service interface
-│   └── TrayIconService.cs      # Tray icon implementation
-├── App.axaml                   # Application resources
-├── App.axaml.cs                # Application lifecycle
-├── Program.cs                  # Entry point
-└── GlujLens.csproj              # Project file
+|-- Models/
+|   |-- AppSettings.cs
+|   |-- CaptureResult.cs
+|   |-- OcrResult.cs
+|   `-- TextRegion.cs
+|-- Services/
+|   |-- HotkeyService.cs
+|   |-- ScreenshotService.cs
+|   |-- TesseractOcrService.cs
+|   `-- TrayIconService.cs
+|-- ViewModels/
+|   |-- MainViewModel.cs
+|   `-- SettingsViewModel.cs
+|-- Views/
+|   |-- MainWindow.axaml
+|   |-- NotificationPopup.axaml
+|   `-- SettingsView.axaml
+|-- App.axaml
+|-- Program.cs
+`-- GlujLens.csproj
 ```
 
-## System Tray
+## Build
 
-The application launches in the background with only a tray icon visible (no main window). Right-click the tray icon to access:
+Prerequisites:
 
-- **Open Application** - Show the main window
-- **📷 Capture Screenshot** - Start a new screenshot capture
-- **Settings** - Open settings dialog
-- **Exit** - Gracefully close the application
+- Windows 10/11
+- .NET 9 SDK
 
-When you close the main window, the application minimizes to the tray and shows a notification (throttled to once per 5 seconds).
+Restore and build:
 
-## Architecture
-
-The application uses a dual-thread approach:
-- **Main thread**: Runs Windows Forms message loop for `NotifyIcon`
-- **Background thread**: Runs Avalonia UI for the main window
-
-## Building and Running
-
-### Prerequisites
-
-- .NET 9.0 SDK
-- Windows 10/11 (for full tray icon support)
-
-### Build
-
-```bash
+```powershell
 dotnet restore
-dotnet build
+dotnet build GlujLens.sln
 ```
 
-### Run
+Run:
 
-```bash
+```powershell
 dotnet run --project GlujLens/GlujLens.csproj
 ```
 
-### Publish
+Publish:
 
-```bash
+```powershell
 dotnet publish GlujLens/GlujLens.csproj -c Release -r win-x64 --self-contained false
 ```
-
-## Configuration
-
-Edit `appsettings.json` to configure:
-
-- `SourceLanguage`: Default source text language (e.g., en-US, de-DE, ru-RU, ja-JP)
-- `TargetLanguage`: Default translation target language
-- `SavePath`: Directory for saved screenshots
-
-## Architecture Overview
-
-The application follows the MVVM pattern:
-
-1. **Models** - Data structures and configuration
-2. **ViewModels** - Business logic and UI state
-3. **Views** - XAML-based UI components
-4. **Services** - Cross-cutting concerns (screenshot, tray icon)
-
-Dependency injection is configured in `App.axaml.cs` using Microsoft.Extensions.DependencyInjection.
 
 ## License
 

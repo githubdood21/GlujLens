@@ -22,7 +22,7 @@
 
     <Grid RowDefinitions="Auto, *, Auto">
         <!-- Top Toolbar -->
-        <Panel Grid.Row="0">
+        <StackPanel Grid.Row="0">
             <StackPanel Orientation="Horizontal" Spacing="10" Margin="10">
                 <Button Content="📷 Capture Screen" 
                         Command="{Binding CaptureCommand}"
@@ -34,12 +34,30 @@
                 <Button Content="💾 Save Image" 
                         Command="{Binding SaveImageCommand}"
                         MinWidth="120"/>
+                <Button Content="🔎 Run OCR"
+                        Command="{Binding RunOcrCommand}"
+                        MinWidth="110"/>
                 <Button Content="🧹 Clear Results" 
                         Command="{Binding ClearResultsCommand}"/>
                 <Button Content="⚙️ Settings" 
                         Command="{Binding OpenSettingsCommand}"/>
             </StackPanel>
-        </Panel>
+
+            <StackPanel Orientation="Horizontal"
+                        Spacing="8"
+                        Margin="10,0,10,8"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding IsOcrProcessing}">
+                <TextBlock Text="OCR"
+                           VerticalAlignment="Center"
+                           FontSize="12"/>
+                <ProgressBar Width="140"
+                             Height="6"
+                             IsIndeterminate="True"
+                             VerticalAlignment="Center"/>
+            </StackPanel>
+        </StackPanel>
 
         <!-- Main Content Area - Split into Capture Preview and AI Results -->
         <Grid Grid.Row="1" ColumnDefinitions="*, 400">
@@ -65,11 +83,49 @@
                                    Foreground="{DynamicResource SystemControlBaseHighBrush}"
                                    HorizontalAlignment="Center"/>
                     </StackPanel>
-                    <!-- Captured image overlay -->
-                    <Image Source="{Binding CapturedImage}" 
-                           Stretch="Uniform"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
+                    <!-- Captured image with OCR overlay. The Viewbox scales original pixel coordinates. -->
+                    <Viewbox Stretch="Uniform"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"
+                             IsVisible="{Binding HasCapturedImage}">
+                        <Grid Width="{Binding CapturedImageWidth}"
+                              Height="{Binding CapturedImageHeight}">
+                            <Image Source="{Binding CapturedImage}"
+                                   Width="{Binding CapturedImageWidth}"
+                                   Height="{Binding CapturedImageHeight}"
+                                   Stretch="Fill"/>
+                            <ItemsControl ItemsSource="{Binding TextRegions}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <Canvas/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.Styles>
+                                    <Style Selector="ContentPresenter">
+                                        <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                                        <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                                    </Style>
+                                </ItemsControl.Styles>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Width="{Binding Width}"
+                                                Height="{Binding Height}"
+                                                MinWidth="0"
+                                                MinHeight="0"
+                                                Padding="0"
+                                                Background="#55FFE166"
+                                                BorderBrush="#DDFFE166"
+                                                BorderThickness="1"
+                                                Command="{Binding $parent[Window].DataContext.SelectTextRegionCommand}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="{Binding Text}">
+                                            <TextBlock Text=""/>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
+                    </Viewbox>
                     <!-- Capture duration overlay -->
                     <Border Background="#80000000"
                             Padding="5,3"
@@ -111,11 +167,20 @@
                             </ListBox>
                         </TabItem>
                         <TabItem Header="📝 OCR Text">
-                            <TextBox Text="{Binding ExtractedText}" 
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     Margin="5"
-                                     IsReadOnly="True"/>
+                            <Grid RowDefinitions="Auto,*" Margin="5">
+                                <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                                    <TextBlock Text="Selected Text" FontWeight="Bold"/>
+                                    <TextBox Text="{Binding SelectedOcrText}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             MinHeight="48"/>
+                                </StackPanel>
+                                <TextBox Grid.Row="1"
+                                         Text="{Binding ExtractedText}" 
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         IsReadOnly="True"/>
+                            </Grid>
                         </TabItem>
                         <TabItem Header="🌐 Translation">
                             <StackPanel Margin="5">

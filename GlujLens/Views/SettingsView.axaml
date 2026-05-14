@@ -5,126 +5,208 @@
         xmlns:vm="using:GlujLens.ViewModels"
         x:Class="GlujLens.Views.SettingsView"
         mc:Ignorable="d"
-        Width="550"
-        Height="600"
-        MinWidth="400"
-        MinHeight="400"
+        Width="620"
+        Height="560"
+        MinWidth="520"
+        MinHeight="460"
         Title="GlujLens - Settings"
         WindowStartupLocation="CenterOwner"
-        SizeToContent="WidthAndHeight"
         CanResize="False">
 
     <Design.DataContext>
         <vm:SettingsViewModel />
     </Design.DataContext>
 
-    <ScrollViewer>
-        <StackPanel Margin="20">
-            <!-- General Settings -->
-            <TextBlock Text="General Settings" 
-                       FontSize="18" 
-                       FontWeight="Bold"
-                       Margin="0,0,0,15"/>
+    <Grid RowDefinitions="*,Auto" Margin="16">
+        <TabControl Grid.Row="0">
+            <TabItem Header="General">
+                <ScrollViewer>
+                    <StackPanel Margin="12" Spacing="12">
+                        <StackPanel>
+                            <TextBlock Text="Default Save Directory" FontSize="13"/>
+                            <TextBox Text="{Binding DefaultSaveDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,5,0,5"/>
+                            <Button Content="Browse"
+                                    Command="{Binding BrowseSaveDirectoryCommand}"
+                                    MinWidth="80"
+                                    HorizontalAlignment="Left"/>
+                        </StackPanel>
 
-            <!-- Default Save Directory -->
-            <StackPanel Margin="0,0,0,10">
-                <TextBlock Text="Default Save Directory" FontSize="13"/>
-                <TextBox Text="{Binding DefaultSaveDirectory, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,5"/>
-            </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Image Format" FontSize="13"/>
+                            <ComboBox SelectedItem="{Binding ImageFormat}"
+                                      ItemsSource="{Binding ImageFormatOptions}"
+                                      Margin="0,5,0,0"
+                                      MinWidth="200"/>
+                        </StackPanel>
 
-            <Button Content="Browse" 
-                    Command="{Binding BrowseSaveDirectoryCommand}"
-                    Margin="0,0,0,15"
-                    MinWidth="80"
-                    HorizontalAlignment="Left"/>
+                        <StackPanel>
+                            <TextBlock Text="{Binding ImageQuality, StringFormat='Image Quality: {0}'}" FontSize="13"/>
+                            <Slider Minimum="10"
+                                    Maximum="100"
+                                    Value="{Binding ImageQuality, UpdateSourceTrigger=PropertyChanged}"
+                                    SmallChange="5"
+                                    LargeChange="10"
+                                    Margin="0,5,0,0"
+                                    MinWidth="300"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-            <!-- Screenshot Settings -->
-            <TextBlock Text="Screenshot Settings" 
-                       FontSize="18" 
-                       FontWeight="Bold"
-                       Margin="0,10,0,15"/>
+            <TabItem Header="Capture">
+                <ScrollViewer>
+                    <StackPanel Margin="12" Spacing="12">
+                        <StackPanel>
+                            <TextBlock Text="Capture Shortcut" FontSize="13"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,5,0,5" Spacing="10">
+                                <TextBox Text="{Binding RecordedShortcutText, UpdateSourceTrigger=PropertyChanged}"
+                                         MinWidth="220"
+                                         IsReadOnly="{Binding IsRecordingShortcut}"/>
+                                <Button Content="Record"
+                                        Command="{Binding StartRecordingShortcutCommand}"
+                                        IsVisible="{Binding !IsRecordingShortcut, Mode=OneWay}"/>
+                                <Button Content="Stop"
+                                        Command="{Binding StopRecordingShortcutCommand}"
+                                        IsVisible="{Binding IsRecordingShortcut, Mode=OneWay}"
+                                        Classes="accent"/>
+                            </StackPanel>
+                            <TextBlock Text="This global hotkey captures the screen while GlujLens is running."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"/>
+                        </StackPanel>
 
-            <!-- Capture Shortcut -->
-            <StackPanel Margin="0,0,0,10">
-                <TextBlock Text="Capture Shortcut" FontSize="13"/>
-                <StackPanel Orientation="Horizontal" Margin="0,5,0,5">
-                    <TextBox Text="{Binding RecordedShortcutText, UpdateSourceTrigger=PropertyChanged}" 
-                             MinWidth="200"
-                             IsReadOnly="{Binding IsRecordingShortcut}"/>
-                    <Button Content="Record" 
-                            Command="{Binding StartRecordingShortcutCommand}"
-                            Margin="10,0,0,0"
-                            IsVisible="{Binding !IsRecordingShortcut, Mode=OneWay}"/>
-                    <Button Content="Stop" 
-                            Command="{Binding StopRecordingShortcutCommand}"
-                            Margin="10,0,0,0"
-                            IsVisible="{Binding IsRecordingShortcut, Mode=OneWay}"
-                            Classes="accent"/>
-                </StackPanel>
-                <TextBlock Text="Note: This hotkey will capture and consume all input when pressed together. Other applications may not receive these key combinations."
-                           FontSize="11"
-                           Foreground="Gray"
-                           Margin="0,5,0,0"/>
-            </StackPanel>
+                        <StackPanel>
+                            <CheckBox Content="Copy to clipboard after capture"
+                                      IsChecked="{Binding CopyToClipboardAfterCapture}"
+                                      Margin="0,3,0,3"/>
+                            <CheckBox Content="Show notification after capture"
+                                      IsChecked="{Binding ShowNotificationAfterCapture}"
+                                      Margin="0,3,0,3"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-            <!-- Hardware Acceleration -->
-            <StackPanel Margin="0,0,0,10">
-                <TextBlock Text="Hardware Acceleration" FontSize="13"/>
-                <ComboBox SelectedItem="{Binding HardwareAcceleration}" 
-                          ItemsSource="{Binding HardwareAccelerationOptions}"
-                          Margin="0,5,0,0"
-                          MinWidth="200"/>
-            </StackPanel>
+            <TabItem Header="OCR">
+                <ScrollViewer>
+                    <StackPanel Margin="12" Spacing="12">
+                        <StackPanel>
+                            <TextBlock Text="OCR Provider" FontSize="13"/>
+                            <ComboBox SelectedItem="{Binding OcrProvider}"
+                                      ItemsSource="{Binding OcrProviderOptions}"
+                                      Margin="0,5,0,0"
+                                      MinWidth="200"/>
+                            <TextBlock Text="Only Tesseract is implemented right now. Google Vision and PaddleOCR are placeholders."
+                                       FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="0,5,0,0"/>
+                        </StackPanel>
 
-            <!-- Image Format -->
-            <StackPanel Margin="0,0,0,10">
-                <TextBlock Text="Image Format" FontSize="13"/>
-                <ComboBox SelectedItem="{Binding ImageFormat}" 
-                          ItemsSource="{Binding ImageFormatOptions}"
-                          Margin="0,5,0,0"
-                          MinWidth="200"/>
-            </StackPanel>
+                        <StackPanel IsVisible="{Binding IsTesseractProvider}">
+                            <TextBlock Text="Tesseract tessdata Folder" FontSize="13"/>
+                            <TextBox Text="{Binding TesseractDataPath, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,5,0,5"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Browse"
+                                        Command="{Binding BrowseTesseractDataPathCommand}"
+                                        MinWidth="80"/>
+                                <Button Content="Refresh"
+                                        Command="{Binding RefreshTesseractLanguagesCommand}"
+                                        MinWidth="80"/>
+                            </StackPanel>
+                        </StackPanel>
 
-            <!-- Image Quality -->
-            <StackPanel Margin="0,0,0,10">
-                <TextBlock Text="{Binding ImageQuality, StringFormat='Image Quality: {0}'}" FontSize="13"/>
-                <Slider Minimum="10" 
-                        Maximum="100" 
-                        Value="{Binding ImageQuality, UpdateSourceTrigger=PropertyChanged}"
-                        SmallChange="5"
-                        LargeChange="10"
-                        Margin="0,5,0,0"
-                        MinWidth="300"/>
-            </StackPanel>
+                        <StackPanel IsVisible="{Binding IsTesseractProvider}" Spacing="8">
+                            <TextBlock Text="Tesseract Text Merge" FontSize="13"/>
 
-            <!-- Options -->
-            <StackPanel Margin="0,10,0,10">
-                <CheckBox Content="Copy to clipboard after capture" 
-                          IsChecked="{Binding CopyToClipboardAfterCapture}"
-                          Margin="0,3,0,3"/>
-                <CheckBox Content="Show notification after capture" 
-                          IsChecked="{Binding ShowNotificationAfterCapture}"
-                          Margin="0,3,0,3"/>
-            </StackPanel>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Grid.Column="0"
+                                           Text="Horizontal word gap"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding TesseractHorizontalMergeGap, StringFormat='{}{0}px'}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                            <Slider Minimum="0"
+                                    Maximum="120"
+                                    TickFrequency="1"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding TesseractHorizontalMergeGap, UpdateSourceTrigger=PropertyChanged}"/>
 
-            <Border BorderBrush="{DynamicResource SystemControlForegroundMediumBrush}"
-                    BorderThickness="0,1,0,0"
-                    Margin="0,15"/>
+                            <Grid ColumnDefinitions="*,Auto" Margin="0,6,0,0">
+                                <TextBlock Grid.Column="0"
+                                           Text="Vertical line tolerance"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding TesseractVerticalMergeTolerance, StringFormat='{}{0}px'}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                            <Slider Minimum="0"
+                                    Maximum="60"
+                                    TickFrequency="1"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding TesseractVerticalMergeTolerance, UpdateSourceTrigger=PropertyChanged}"/>
+                        </StackPanel>
 
-            <!-- Status Message -->
-            <TextBlock Text="{Binding StatusMessage}" 
+                        <StackPanel IsVisible="{Binding IsGoogleVisionProvider}">
+                            <TextBlock Text="Google Vision API Key" FontSize="13"/>
+                            <TextBox Text="{Binding GoogleVisionApiKey, UpdateSourceTrigger=PropertyChanged}"
+                                     PasswordChar="*"
+                                     Margin="0,5,0,0"/>
+                        </StackPanel>
+
+                        <StackPanel IsVisible="{Binding IsPaddleOcrProvider}">
+                            <TextBlock Text="PaddleOCR Model Folder" FontSize="13"/>
+                            <TextBox Text="{Binding PaddleOcrModelPath, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,5,0,5"/>
+                            <Button Content="Browse"
+                                    Command="{Binding BrowsePaddleOcrModelPathCommand}"
+                                    MinWidth="80"
+                                        HorizontalAlignment="Left"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="16">
+                            <StackPanel IsVisible="{Binding IsTesseractProvider}">
+                                <TextBlock Text="Tesseract Language Data" FontSize="13"/>
+                                <ComboBox SelectedItem="{Binding SelectedTesseractLanguage}"
+                                          ItemsSource="{Binding AvailableTesseractLanguages}"
+                                          Margin="0,5,0,0"
+                                          MinWidth="160"/>
+                                <TextBlock Text="{Binding SourceLanguage, StringFormat='Selected code: {0}'}"
+                                           FontSize="11"
+                                           Foreground="Gray"
+                                           Margin="0,5,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel>
+                                <TextBlock Text="Target Language" FontSize="13"/>
+                                <TextBox Text="{Binding TargetLanguage, UpdateSourceTrigger=PropertyChanged}"
+                                         Margin="0,5,0,0"
+                                         MinWidth="160"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+            <TextBlock Grid.Column="0"
+                       Text="{Binding StatusMessage}"
                        FontSize="12"
-                       Foreground="{DynamicResource SystemControlBaseHighBrush}"
-                       Margin="0,0,0,15"/>
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource SystemControlBaseHighBrush}"/>
 
-            <!-- Action Buttons -->
-            <StackPanel Orientation="Horizontal" 
-                        HorizontalAlignment="Right" 
-                        Spacing="10">
-                <Button Content="Reset to Defaults" 
-                        Command="{Binding ResetToDefaultsCommand}"
-                        MinWidth="120"/>
-            </StackPanel>
-        </StackPanel>
-    </ScrollViewer>
+            <Button Grid.Column="1"
+                    Content="Reset to Defaults"
+                    Command="{Binding ResetToDefaultsCommand}"
+                    MinWidth="120"/>
+        </Grid>
+    </Grid>
 </Window>

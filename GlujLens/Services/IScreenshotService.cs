@@ -13,6 +13,11 @@ public interface IScreenshotService
     Task<CaptureResult> CaptureFullScreenAsync();
 
     /// <summary>
+    /// Captures every active display in its virtual desktop position.
+    /// </summary>
+    Task<CaptureResult> CaptureAllDisplaysAsync();
+
+    /// <summary>
     /// Captures a specific region of the screen.
     /// </summary>
     /// <param name="x">X coordinate of the region top-left corner.</param>

@@ -18,6 +18,7 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly ITrayIconService _trayIcon;
     private readonly IScreenshotService _screenshotService;
+    private readonly IOcrService _ocrService;
     private readonly AppSettings _settings;
 
     [ObservableProperty]
@@ -28,6 +29,9 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isProcessing;
+
+    [ObservableProperty]
+    private bool _isOcrProcessing;
 
     [ObservableProperty]
     private ObservableCollection<DetectedObject> _detectedObjects = new();
@@ -54,6 +58,15 @@ public partial class MainViewModel : ObservableObject
     private bool _hasCapturedImage;
 
     [ObservableProperty]
+    private int _capturedImageWidth;
+
+    [ObservableProperty]
+    private int _capturedImageHeight;
+
+    [ObservableProperty]
+    private string _selectedOcrText = string.Empty;
+
+    [ObservableProperty]
     private string _captureDuration = string.Empty;
 
     private byte[]? _lastCapturedImage;
@@ -66,10 +79,11 @@ public partial class MainViewModel : ObservableObject
         HasCapturedImage = value != null;
     }
 
-    public MainViewModel(ITrayIconService trayIcon, IScreenshotService screenshotService, AppSettings settings, IServiceProvider serviceProvider)
+    public MainViewModel(ITrayIconService trayIcon, IScreenshotService screenshotService, IOcrService ocrService, AppSettings settings, IServiceProvider serviceProvider)
     {
         _trayIcon = trayIcon;
         _screenshotService = screenshotService;
+        _ocrService = ocrService;
         _settings = settings;
         _serviceProvider = serviceProvider;
 
@@ -89,21 +103,41 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task CaptureAsync()
     {
+        await CaptureAsync(captureAllDisplays: false);
+    }
+
+    [RelayCommand]
+    private async Task CaptureAllDisplaysAsync()
+    {
+        await CaptureAsync(captureAllDisplays: true);
+    }
+
+    private async Task CaptureAsync(bool captureAllDisplays)
+    {
         if (IsProcessing) return;
 
         IsProcessing = true;
-        StatusText = "Capturing screenshot...";
+        StatusText = captureAllDisplays
+            ? "Capturing all displays..."
+            : "Capturing screenshot...";
         CaptureDuration = string.Empty;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            var result = await _screenshotService.CaptureFullScreenAsync();
+            var result = captureAllDisplays
+                ? await _screenshotService.CaptureAllDisplaysAsync()
+                : await _screenshotService.CaptureFullScreenAsync();
             stopwatch.Stop();
 
             if (result.Success && result.ImageData != null)
             {
                 _lastCapturedImage = result.ImageData;
+                CapturedImageWidth = result.Width;
+                CapturedImageHeight = result.Height;
+                TextRegions.Clear();
+                ExtractedText = string.Empty;
+                SelectedOcrText = string.Empty;
 
                 // Convert byte[] to Avalonia Bitmap for preview
                 using var ms = new MemoryStream(result.ImageData);
@@ -123,7 +157,9 @@ public partial class MainViewModel : ObservableObject
                     CaptureDuration = $"Capture time: {elapsed.TotalSeconds:F2} s";
                 }
 
-                StatusText = $"Screenshot captured successfully ({result.Width}x{result.Height})";
+                StatusText = captureAllDisplays
+                    ? $"All displays captured successfully ({result.Width}x{result.Height})"
+                    : $"Screenshot captured successfully ({result.Width}x{result.Height})";
 
                 // Show notification popup if enabled
                 if (_settings.ShowNotificationAfterCapture)
@@ -211,8 +247,54 @@ public partial class MainViewModel : ObservableObject
         ExtractedText = string.Empty;
         TranslatedText = string.Empty;
         CapturedImage = null;
+        CapturedImageWidth = 0;
+        CapturedImageHeight = 0;
         _lastCapturedImage = null;
+        SelectedOcrText = string.Empty;
         StatusText = "Ready";
+    }
+
+    [RelayCommand]
+    private async Task RunOcrAsync()
+    {
+        if (_lastCapturedImage == null)
+        {
+            StatusText = "No screenshot captured yet";
+            return;
+        }
+
+        if (IsProcessing) return;
+
+        IsProcessing = true;
+        IsOcrProcessing = true;
+        try
+        {
+            await RunOcrAsync(_lastCapturedImage);
+        }
+        finally
+        {
+            IsOcrProcessing = false;
+            IsProcessing = false;
+        }
+    }
+
+    [RelayCommand]
+    private void SelectTextRegion(TextRegion? region)
+    {
+        if (region == null)
+            return;
+
+        SelectedOcrText = region.Text;
+        StatusText = $"Selected OCR text: {region.Text}";
+
+        try
+        {
+            Clipboard.SetText(region.Text);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to copy selected OCR text: {ex.Message}");
+        }
     }
 
     [RelayCommand]
@@ -417,5 +499,45 @@ public partial class MainViewModel : ObservableObject
             ? $"Hotkey refreshed. Capture shortcut: {shortcut}"
             : $"Hotkey refresh failed. Capture shortcut: {shortcut}";
         return refreshed;
+    }
+
+    private async Task RunOcrAsync(byte[] imageData)
+    {
+        if (string.Equals(_settings.OcrProvider, "Disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractedText = string.Empty;
+            TextRegions.Clear();
+            return;
+        }
+
+        if (!string.Equals(_settings.OcrProvider, "Tesseract", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractedText = string.Empty;
+            TextRegions.Clear();
+            StatusText = $"{_settings.OcrProvider} OCR is not implemented yet";
+            return;
+        }
+
+        StatusText = "Running Tesseract OCR...";
+        var ocrResult = await _ocrService.ExtractTextAsync(imageData);
+        if (!ocrResult.Success)
+        {
+            ExtractedText = string.Empty;
+            TextRegions.Clear();
+            StatusText = $"OCR failed: {ocrResult.ErrorMessage ?? "Unknown error"}";
+            return;
+        }
+
+        ExtractedText = ocrResult.Text;
+        SelectedOcrText = string.Empty;
+        TextRegions.Clear();
+        foreach (var region in ocrResult.TextRegions)
+        {
+            TextRegions.Add(region);
+        }
+
+        StatusText = string.IsNullOrWhiteSpace(ExtractedText)
+            ? "Screenshot captured; OCR found no text"
+            : $"Screenshot captured; OCR extracted {TextRegions.Count} text regions";
     }
 }

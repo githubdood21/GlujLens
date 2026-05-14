@@ -8,6 +8,9 @@ namespace GlujLens.Models;
 /// </summary>
 public class AppSettings : INotifyPropertyChanged
 {
+    public const int DefaultTesseractHorizontalMergeGap = 32;
+    public const int DefaultTesseractVerticalMergeTolerance = 12;
+
     private readonly string _settingsFilePath;
     private string? _defaultSaveDirectory;
     private string? _captureShortcut;
@@ -17,11 +20,15 @@ public class AppSettings : INotifyPropertyChanged
     private bool _copyToClipboardAfterCapture;
     private bool _showNotificationAfterCapture;
     private bool _useLocalTesseract;
+    private string? _ocrProvider;
     private string? _tesseractDataPath;
+    private string? _paddleOcrModelPath;
     private string? _googleVisionApiKey;
     private string? _googleTranslationApiKey;
     private string? _sourceLanguage;
     private string? _targetLanguage;
+    private int _tesseractHorizontalMergeGap;
+    private int _tesseractVerticalMergeTolerance;
 
     public AppSettings()
     {
@@ -35,11 +42,15 @@ public class AppSettings : INotifyPropertyChanged
         _copyToClipboardAfterCapture = false;
         _showNotificationAfterCapture = true;
         _useLocalTesseract = false;
-        _tesseractDataPath = null;
+        _ocrProvider = "Tesseract";
+        _tesseractDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
+        _paddleOcrModelPath = null;
         _googleVisionApiKey = null;
         _googleTranslationApiKey = null;
         _sourceLanguage = "en-US";
         _targetLanguage = "en-US";
+        _tesseractHorizontalMergeGap = DefaultTesseractHorizontalMergeGap;
+        _tesseractVerticalMergeTolerance = DefaultTesseractVerticalMergeTolerance;
     }
 
     /// <summary>
@@ -69,11 +80,15 @@ public class AppSettings : INotifyPropertyChanged
                 CopyToClipboardAfterCapture = dto.CopyToClipboardAfterCapture ?? false;
                 ShowNotificationAfterCapture = dto.ShowNotificationAfterCapture ?? true;
                 UseLocalTesseract = dto.UseLocalTesseract ?? false;
-                TesseractDataPath = dto.TesseractDataPath;
+                OcrProvider = dto.OcrProvider ?? "Tesseract";
+                TesseractDataPath = dto.TesseractDataPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
+                PaddleOcrModelPath = dto.PaddleOcrModelPath;
                 GoogleVisionApiKey = dto.GoogleVisionApiKey;
                 GoogleTranslationApiKey = dto.GoogleTranslationApiKey;
                 SourceLanguage = dto.SourceLanguage ?? "en-US";
                 TargetLanguage = dto.TargetLanguage ?? "en-US";
+                TesseractHorizontalMergeGap = dto.TesseractHorizontalMergeGap ?? DefaultTesseractHorizontalMergeGap;
+                TesseractVerticalMergeTolerance = dto.TesseractVerticalMergeTolerance ?? DefaultTesseractVerticalMergeTolerance;
             }
         }
         catch (Exception ex)
@@ -116,11 +131,15 @@ public class AppSettings : INotifyPropertyChanged
             CopyToClipboardAfterCapture = CopyToClipboardAfterCapture,
             ShowNotificationAfterCapture = ShowNotificationAfterCapture,
             UseLocalTesseract = UseLocalTesseract,
+            OcrProvider = OcrProvider,
             TesseractDataPath = TesseractDataPath,
+            PaddleOcrModelPath = PaddleOcrModelPath,
             GoogleVisionApiKey = GoogleVisionApiKey,
             GoogleTranslationApiKey = GoogleTranslationApiKey,
             SourceLanguage = SourceLanguage,
-            TargetLanguage = TargetLanguage
+            TargetLanguage = TargetLanguage,
+            TesseractHorizontalMergeGap = TesseractHorizontalMergeGap,
+            TesseractVerticalMergeTolerance = TesseractVerticalMergeTolerance
         };
 
         try
@@ -138,11 +157,15 @@ public class AppSettings : INotifyPropertyChanged
             CopyToClipboardAfterCapture = backup.CopyToClipboardAfterCapture ?? false;
             ShowNotificationAfterCapture = backup.ShowNotificationAfterCapture ?? true;
             UseLocalTesseract = backup.UseLocalTesseract ?? false;
+            OcrProvider = backup.OcrProvider;
             TesseractDataPath = backup.TesseractDataPath;
+            PaddleOcrModelPath = backup.PaddleOcrModelPath;
             GoogleVisionApiKey = backup.GoogleVisionApiKey;
             GoogleTranslationApiKey = backup.GoogleTranslationApiKey;
             SourceLanguage = backup.SourceLanguage;
             TargetLanguage = backup.TargetLanguage;
+            TesseractHorizontalMergeGap = backup.TesseractHorizontalMergeGap ?? DefaultTesseractHorizontalMergeGap;
+            TesseractVerticalMergeTolerance = backup.TesseractVerticalMergeTolerance ?? DefaultTesseractVerticalMergeTolerance;
         }
     }
 
@@ -194,10 +217,22 @@ public class AppSettings : INotifyPropertyChanged
         set { _useLocalTesseract = value; OnPropertyChanged(); }
     }
 
+    public string? OcrProvider
+    {
+        get => _ocrProvider;
+        set { _ocrProvider = value; OnPropertyChanged(); }
+    }
+
     public string? TesseractDataPath
     {
         get => _tesseractDataPath;
         set { _tesseractDataPath = value; OnPropertyChanged(); }
+    }
+
+    public string? PaddleOcrModelPath
+    {
+        get => _paddleOcrModelPath;
+        set { _paddleOcrModelPath = value; OnPropertyChanged(); }
     }
 
     public string? GoogleVisionApiKey
@@ -224,6 +259,18 @@ public class AppSettings : INotifyPropertyChanged
         set { _targetLanguage = value; OnPropertyChanged(); }
     }
 
+    public int TesseractHorizontalMergeGap
+    {
+        get => _tesseractHorizontalMergeGap;
+        set { _tesseractHorizontalMergeGap = Math.Clamp(value, 0, 200); OnPropertyChanged(); }
+    }
+
+    public int TesseractVerticalMergeTolerance
+    {
+        get => _tesseractVerticalMergeTolerance;
+        set { _tesseractVerticalMergeTolerance = Math.Clamp(value, 0, 100); OnPropertyChanged(); }
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -245,11 +292,15 @@ internal class SettingsDto
     public bool? CopyToClipboardAfterCapture { get; set; }
     public bool? ShowNotificationAfterCapture { get; set; }
     public bool? UseLocalTesseract { get; set; }
+    public string? OcrProvider { get; set; }
     public string? TesseractDataPath { get; set; }
+    public string? PaddleOcrModelPath { get; set; }
     public string? GoogleVisionApiKey { get; set; }
     public string? GoogleTranslationApiKey { get; set; }
     public string? SourceLanguage { get; set; }
     public string? TargetLanguage { get; set; }
+    public int? TesseractHorizontalMergeGap { get; set; }
+    public int? TesseractVerticalMergeTolerance { get; set; }
 }
 
 /// <summary>
