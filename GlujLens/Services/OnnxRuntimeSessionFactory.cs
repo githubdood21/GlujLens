@@ -66,7 +66,8 @@ public sealed class OnnxRuntimeSessionFactory
     {
         var options = new SessionOptions
         {
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+            LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR
         };
 
         if (string.Equals(accelerator, "DirectML", StringComparison.OrdinalIgnoreCase) ||

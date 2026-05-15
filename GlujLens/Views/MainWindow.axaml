@@ -111,14 +111,15 @@
                                    Width="{Binding CapturedImageWidth}"
                                    Height="{Binding CapturedImageHeight}"
                                    Stretch="Fill"/>
-                            <ItemsControl ItemsSource="{Binding TextRegions}">
+                            <ItemsControl x:Name="OcrOverlayItems"
+                                          ItemsSource="{Binding TextRegions}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <Canvas/>
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.Styles>
-                                    <Style Selector="ContentPresenter">
+                                    <Style Selector="ItemsControl#OcrOverlayItems > ContentPresenter">
                                         <Setter Property="Canvas.Left" Value="{Binding X}"/>
                                         <Setter Property="Canvas.Top" Value="{Binding Y}"/>
                                     </Style>

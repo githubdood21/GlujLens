@@ -47,7 +47,8 @@ public sealed class MlNetOcrModelCatalog
             .Select(TryCreateModelDirectoryInfo)
             .Where(model => model != null)
             .Cast<MlNetOcrModelInfo>()
-            .OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(model => IsPreferredPaddleOcrDirectory(model.ModelPath))
+            .ThenBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault()
             ?? Directory
             .EnumerateFiles(path, "*.*", SearchOption.AllDirectories)
@@ -64,6 +65,13 @@ public sealed class MlNetOcrModelCatalog
             .FirstOrDefault();
     }
 
+    private static bool IsPreferredPaddleOcrDirectory(string path)
+    {
+        return File.Exists(Path.Combine(path, "PP-OCRv5_server_det_infer.onnx")) &&
+               File.Exists(Path.Combine(path, "PP-OCRv5_server_rec_infer.onnx")) &&
+               File.Exists(Path.Combine(path, "ppocrv5_dict.txt"));
+    }
+
     public PaddleOnnxOcrModel? GetSelectedPaddleOcrModel()
     {
         var selected = GetSelectedModel();
@@ -73,6 +81,12 @@ public sealed class MlNetOcrModelCatalog
         }
 
         var root = selected.ModelPath;
+        var flatV5Model = TryCreateFlatPaddleOcrModel(root);
+        if (flatV5Model != null)
+        {
+            return flatV5Model;
+        }
+
         var detectionModel = FindPreferredFile(root, new[]
         {
             Path.Combine("detection", "v5", "det.onnx"),
@@ -105,8 +119,68 @@ public sealed class MlNetOcrModelCatalog
         };
     }
 
+    private static PaddleOnnxOcrModel? TryCreateFlatPaddleOcrModel(string root)
+    {
+        var detectionModel = FindPreferredFile(root, new[]
+        {
+            "PP-OCRv5_server_det_infer.onnx",
+            "PP-OCRv5_mobile_det_infer.onnx",
+            "PP-OCRv4_server_det_infer.onnx",
+            "PP-OCRv4_mobile_det_infer.onnx"
+        }) ?? Directory
+            .EnumerateFiles(root, "*det*.onnx", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        var recognitionModel = FindPreferredFile(root, new[]
+        {
+            "PP-OCRv5_server_rec_infer.onnx",
+            "PP-OCRv5_mobile_rec_infer.onnx",
+            "PP-OCRv4_server_rec_infer.onnx",
+            "PP-OCRv4_mobile_rec_infer.onnx"
+        }) ?? Directory
+            .EnumerateFiles(root, "*rec*.onnx", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        var dictionary = FindPreferredFile(root, new[]
+        {
+            "ppocrv5_dict.txt",
+            "dict.txt",
+            "en_dict.txt"
+        }) ?? Directory
+            .EnumerateFiles(root, "*dict*.txt", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(detectionModel) ||
+            string.IsNullOrWhiteSpace(recognitionModel) ||
+            string.IsNullOrWhiteSpace(dictionary))
+        {
+            return null;
+        }
+
+        return new PaddleOnnxOcrModel
+        {
+            RootDirectory = root,
+            DetectionModelPath = detectionModel,
+            RecognitionModelPath = recognitionModel,
+            TextLineOrientationModelPath = Directory
+                .EnumerateFiles(root, "*textline*ori*.onnx", SearchOption.TopDirectoryOnly)
+                .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault(),
+            DictionaryPath = dictionary,
+            RecognitionLanguage = "ppocrv5"
+        };
+    }
+
     private static MlNetOcrModelInfo? TryCreateModelDirectoryInfo(string directory)
     {
+        if (!LooksLikeModelDirectory(directory))
+        {
+            return null;
+        }
+
         var onnxFiles = Directory
             .EnumerateFiles(directory, "*.onnx", SearchOption.AllDirectories)
             .OrderBy(path => Path.GetRelativePath(directory, path), StringComparer.OrdinalIgnoreCase)
@@ -123,6 +197,13 @@ public sealed class MlNetOcrModelCatalog
             DirectoryPath = directory,
             OnnxModelPaths = onnxFiles
         };
+    }
+
+    private static bool LooksLikeModelDirectory(string directory)
+    {
+        return Directory.EnumerateFiles(directory, "*.onnx", SearchOption.TopDirectoryOnly).Any() ||
+               Directory.Exists(Path.Combine(directory, "detection")) ||
+               Directory.Exists(Path.Combine(directory, "languages"));
     }
 
     private static string? FindPreferredLanguageDirectory(string root)

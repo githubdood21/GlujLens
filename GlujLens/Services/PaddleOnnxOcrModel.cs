@@ -8,6 +8,8 @@ public sealed class PaddleOnnxOcrModel
 
     public string RecognitionModelPath { get; init; } = string.Empty;
 
+    public string? TextLineOrientationModelPath { get; init; }
+
     public string DictionaryPath { get; init; } = string.Empty;
 
     public string RecognitionLanguage { get; init; } = string.Empty;
