@@ -1,4 +1,6 @@
 using GlujLens.Models;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SkiaSharp;
@@ -7,23 +9,26 @@ namespace GlujLens.Services;
 
 public sealed class PaddleOnnxOcrRunner
 {
-    private const int SharedMaxRecognitionWidth = 4096;
-
     private static readonly OcrInferenceProfile SharedProfile = new(
-        DetectionLimitSideLength: 1536,
+        DetectionLimitSideLength: 1152,
         DetectionBitmapThreshold: 0.30f,
         DetectionBoxThreshold: 0.55f,
-        DetectionUnclipRatio: 1.6f,
+        DetectionUnclipRatio: 1.5f,
         MinimumBoxSize: 4,
         CropPadding: 3,
-        VerticalCropPadding: 7,
-        MaxRecognitionWidth: SharedMaxRecognitionWidth,
-        LowConfidenceRetryThreshold: 0.58f);
+        VerticalCropPadding: 6,
+        MaxRecognitionWidth: 2048,
+        LowConfidenceRetryThreshold: 0.54f,
+        AlwaysRunContrastDetectionPass: false,
+        EnableRecognitionRetries: true,
+        MaximumGroupedLineWidth: 1500,
+        MaximumGroupedVerticalHeight: 2200);
 
     private static readonly float[] DetectionMean = { 0.485f, 0.456f, 0.406f };
     private static readonly float[] DetectionStd = { 0.229f, 0.224f, 0.225f };
     private static readonly float[] RecognitionMean = { 0.5f, 0.5f, 0.5f };
     private static readonly float[] RecognitionStd = { 0.5f, 0.5f, 0.5f };
+    private static readonly ConcurrentDictionary<string, CachedDictionary> DictionaryCache = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly OnnxRuntimeSessionFactory _sessionFactory;
 
@@ -38,7 +43,11 @@ public sealed class PaddleOnnxOcrRunner
         string? accelerator,
         CancellationToken cancellationToken)
     {
+        var timing = new OcrInferenceTiming();
+        var totalStopwatch = Stopwatch.StartNew();
+        var stageStopwatch = Stopwatch.StartNew();
         using var bitmap = SKBitmap.Decode(imageData);
+        timing.Decode = stageStopwatch.Elapsed;
         if (bitmap == null)
         {
             return new OcrResult
@@ -48,31 +57,99 @@ public sealed class PaddleOnnxOcrRunner
             };
         }
 
-        using var sessions = _sessionFactory.LoadSessions(
-            new[] { model.DetectionModelPath, model.RecognitionModelPath },
-            accelerator,
-            cancellationToken);
-
-        var profile = SharedProfile;
-        var detectionSession = sessions.Sessions[0].Session;
-        var recognitionSession = sessions.Sessions[1].Session;
-        var boxes = DetectTextBoxes(detectionSession, bitmap, profile, cancellationToken);
-        var dictionary = LoadDictionary(model.DictionaryPath);
         var result = new OcrResult { Success = true };
+        var profile = SharedProfile;
+        IReadOnlyList<DetectedTextBox> boxes;
 
+        stageStopwatch.Restart();
+        OnnxSessionBundle detectionSessions;
+        detectionSessions = _sessionFactory.LoadSessions(
+            new[] { model.DetectionModelPath },
+            accelerator,
+            cancellationToken,
+            optimizeForLowMemory: true);
+        timing.DetectionSessionLoad = stageStopwatch.Elapsed;
+
+        stageStopwatch.Restart();
+        using (detectionSessions)
+        {
+            boxes = DetectTextBoxes(detectionSessions.Sessions[0].Session, bitmap, profile, cancellationToken);
+        }
+        timing.DetectionRunAndDispose = stageStopwatch.Elapsed;
+        timing.DetectedBoxes = boxes.Count;
+
+        stageStopwatch.Restart();
+        TrimInferenceMemory();
+        timing.FirstTrim = stageStopwatch.Elapsed;
+
+        if (boxes.Count == 0)
+        {
+            totalStopwatch.Stop();
+            LogOcrTiming(timing, totalStopwatch.Elapsed, accelerator, model);
+            return result;
+        }
+
+        stageStopwatch.Restart();
+        var textItems = new List<TextRecognitionItem>();
         foreach (var box in boxes)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            foreach (var textBounds in SplitIntoTextBounds(bitmap, box.Bounds, profile))
+            var textBoundsList = SplitIntoTextBounds(bitmap, box.Bounds, profile);
+            textItems.AddRange(textBoundsList.Select(textBounds =>
+                new TextRecognitionItem(textBounds.Bounds, textBounds.Orientation, box.Score)));
+        }
+
+        timing.Split = stageStopwatch.Elapsed;
+        timing.TextCandidates = textItems.Count;
+        textItems = GroupHorizontalTextLines(textItems, profile).ToList();
+        timing.GroupedTextCandidates = textItems.Count;
+
+        if (textItems.Count == 0)
+        {
+            totalStopwatch.Stop();
+            LogOcrTiming(timing, totalStopwatch.Elapsed, accelerator, model);
+            return result;
+        }
+
+        stageStopwatch.Restart();
+        var dictionary = LoadDictionary(model.DictionaryPath);
+        timing.DictionaryLoad = stageStopwatch.Elapsed;
+
+        var recognitionAccelerator = ResolveRecognitionAccelerator(accelerator);
+        timing.RecognitionAccelerator = recognitionAccelerator;
+
+        stageStopwatch.Restart();
+        OnnxSessionBundle recognitionSessions;
+        recognitionSessions = _sessionFactory.LoadSessions(
+            new[] { model.RecognitionModelPath },
+            recognitionAccelerator,
+            cancellationToken,
+            optimizeForLowMemory: true);
+        timing.RecognitionSessionLoad = stageStopwatch.Elapsed;
+
+        stageStopwatch.Restart();
+        using (recognitionSessions)
+        {
+            var recognitionSession = recognitionSessions.Sessions[0].Session;
+            var recognitionContext = CreateRecognitionContext(recognitionSession);
+
+            foreach (var textItem in textItems)
             {
-                using var crop = Crop(bitmap, textBounds.Bounds, ResolveCropPadding(profile, textBounds.Orientation));
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var cropStopwatch = Stopwatch.StartNew();
+                using var crop = Crop(bitmap, textItem.Bounds, ResolveCropPadding(profile, textItem.Orientation));
+                timing.Crop += cropStopwatch.Elapsed;
                 if (crop == null)
                 {
                     continue;
                 }
 
-                var recognized = RecognizeText(recognitionSession, crop, dictionary, profile, textBounds.Orientation);
+                var recognitionStopwatch = Stopwatch.StartNew();
+                var recognized = RecognizeText(recognitionContext, crop, dictionary, profile, textItem.Orientation);
+                timing.Recognition += recognitionStopwatch.Elapsed;
+                timing.RecognitionCalls++;
                 if (string.IsNullOrWhiteSpace(recognized.Text))
                 {
                     continue;
@@ -81,20 +158,31 @@ public sealed class PaddleOnnxOcrRunner
                 result.TextRegions.Add(new TextRegion
                 {
                     Text = recognized.Text,
-                    Confidence = Math.Min(box.Score, recognized.Confidence),
-                    X = textBounds.Bounds.Left,
-                    Y = textBounds.Bounds.Top,
-                    Width = textBounds.Bounds.Width,
-                    Height = textBounds.Bounds.Height,
+                    Confidence = Math.Min(textItem.DetectionScore, recognized.Confidence),
+                    X = textItem.Bounds.Left,
+                    Y = textItem.Bounds.Top,
+                    Width = textItem.Bounds.Width,
+                    Height = textItem.Bounds.Height,
                     Language = model.RecognitionLanguage
                 });
             }
         }
+        timing.RecognitionLoopAndDispose = stageStopwatch.Elapsed;
 
+        stageStopwatch.Restart();
+        TrimInferenceMemory();
+        timing.SecondTrim = stageStopwatch.Elapsed;
+
+        stageStopwatch.Restart();
         var orderedRegions = OrderTextRegionsForReading(result.TextRegions).ToList();
         result.TextRegions.Clear();
         result.TextRegions.AddRange(orderedRegions);
         result.Text = string.Join(Environment.NewLine, result.TextRegions.Select(region => region.Text));
+        timing.ResultOrdering = stageStopwatch.Elapsed;
+        timing.OutputRegions = result.TextRegions.Count;
+
+        totalStopwatch.Stop();
+        LogOcrTiming(timing, totalStopwatch.Elapsed, accelerator, model);
         return result;
     }
 
@@ -111,16 +199,81 @@ public sealed class PaddleOnnxOcrRunner
             SKFilterQuality.Medium);
         var inputBitmap = resizedOriginal ?? bitmap;
         var boxes = RunDetectionPass(session, inputName, inputBitmap, bitmap.Width, bitmap.Height, profile).ToList();
-
-        using var normalized = CreateContrastNormalizedBitmap(inputBitmap);
-        boxes.AddRange(RunDetectionPass(session, inputName, normalized, bitmap.Width, bitmap.Height, profile));
-        boxes = MergeOverlappingBoxes(boxes).ToList();
+        if (ShouldRunContrastDetectionPass(boxes, bitmap, profile))
+        {
+            using var normalized = CreateContrastNormalizedBitmap(inputBitmap);
+            boxes.AddRange(RunDetectionPass(session, inputName, normalized, bitmap.Width, bitmap.Height, profile));
+            boxes = MergeOverlappingBoxes(boxes).ToList();
+        }
 
         return boxes
             .Where(box => box.Bounds.Width >= profile.MinimumBoxSize && box.Bounds.Height >= profile.MinimumBoxSize)
             .OrderBy(box => box.Bounds.Top)
             .ThenBy(box => box.Bounds.Left)
             .ToList();
+    }
+
+    private static bool ShouldRunContrastDetectionPass(
+        IReadOnlyList<DetectedTextBox> boxes,
+        SKBitmap bitmap,
+        OcrInferenceProfile profile)
+    {
+        if (profile.AlwaysRunContrastDetectionPass || boxes.Count == 0)
+        {
+            return true;
+        }
+
+        var totalArea = Math.Max(1, bitmap.Width * bitmap.Height);
+        var detectedArea = boxes.Sum(box => Math.Max(0, box.Bounds.Width) * Math.Max(0, box.Bounds.Height));
+        var coverage = detectedArea / (double)totalArea;
+        return boxes.Count <= 2 && coverage < 0.015;
+    }
+
+    private static void TrimInferenceMemory()
+    {
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
+        GC.WaitForPendingFinalizers();
+    }
+
+    private static string ResolveRecognitionAccelerator(string? accelerator)
+    {
+        var normalized = accelerator?.Trim();
+        if (string.Equals(normalized, "CPU", StringComparison.OrdinalIgnoreCase))
+        {
+            return "CPU";
+        }
+
+        return string.Equals(normalized, "DirectML", StringComparison.OrdinalIgnoreCase)
+            ? "DirectML"
+            : "Auto";
+    }
+
+    private static void LogOcrTiming(
+        OcrInferenceTiming timing,
+        TimeSpan total,
+        string? accelerator,
+        PaddleOnnxOcrModel model)
+    {
+        var message =
+            "PaddleOCR timing " +
+            $"accelerator={accelerator ?? "Auto"} " +
+            $"recAccelerator={timing.RecognitionAccelerator ?? accelerator ?? "Auto"} " +
+            $"model={Path.GetFileName(model.RootDirectory)} " +
+            $"boxes={timing.DetectedBoxes} candidates={timing.TextCandidates} groupedCandidates={timing.GroupedTextCandidates} regions={timing.OutputRegions} calls={timing.RecognitionCalls} " +
+            $"total={FormatMs(total)} decode={FormatMs(timing.Decode)} " +
+            $"detLoad={FormatMs(timing.DetectionSessionLoad)} detRunDispose={FormatMs(timing.DetectionRunAndDispose)} " +
+            $"trim1={FormatMs(timing.FirstTrim)} dict={FormatMs(timing.DictionaryLoad)} " +
+            $"recLoad={FormatMs(timing.RecognitionSessionLoad)} split={FormatMs(timing.Split)} crop={FormatMs(timing.Crop)} " +
+            $"recognize={FormatMs(timing.Recognition)} recLoopDispose={FormatMs(timing.RecognitionLoopAndDispose)} " +
+            $"trim2={FormatMs(timing.SecondTrim)} order={FormatMs(timing.ResultOrdering)}";
+
+        Debug.WriteLine(message);
+        Trace.WriteLine(message);
+    }
+
+    private static string FormatMs(TimeSpan elapsed)
+    {
+        return $"{elapsed.TotalMilliseconds:0}ms";
     }
 
     private static IReadOnlyList<DetectedTextBox> RunDetectionPass(
@@ -301,32 +454,436 @@ public sealed class PaddleOnnxOcrRunner
                region.Width <= Math.Max(96, region.Height * 0.65);
     }
 
+    private static IReadOnlyList<TextRecognitionItem> GroupHorizontalTextLines(
+        IReadOnlyList<TextRecognitionItem> items,
+        OcrInferenceProfile profile)
+    {
+        var verticalCandidates = ExtractVerticalColumnCandidates(items, profile);
+        var verticalCandidateSet = verticalCandidates
+            .SelectMany(group => group)
+            .ToHashSet();
+
+        var horizontal = items
+            .Where(item => item.Orientation == TextOrientation.Horizontal)
+            .Where(item => !verticalCandidateSet.Contains(item))
+            .OrderBy(item => item.Bounds.Top)
+            .ThenBy(item => item.Bounds.Left)
+            .ToList();
+        var vertical = items
+            .Where(item => item.Orientation == TextOrientation.Vertical)
+            .Where(item => !verticalCandidateSet.Contains(item))
+            .ToList();
+
+        if (horizontal.Count <= 1)
+        {
+            return horizontal.Concat(GroupVerticalTextColumns(vertical, profile)).ToList();
+        }
+
+        var rows = BuildTextRows(horizontal);
+        var grouped = new List<TextRecognitionItem>();
+        foreach (var row in rows)
+        {
+            grouped.AddRange(GroupTextRow(row, profile));
+        }
+
+        grouped.AddRange(verticalCandidates.Select(group => MergeVerticalCandidateGroup(group)));
+        grouped.AddRange(GroupVerticalTextColumns(vertical, profile));
+        return grouped
+            .OrderBy(item => item.Bounds.Top)
+            .ThenBy(item => item.Bounds.Left)
+            .ToList();
+    }
+
+    private static IReadOnlyList<List<TextRecognitionItem>> ExtractVerticalColumnCandidates(
+        IReadOnlyList<TextRecognitionItem> items,
+        OcrInferenceProfile profile)
+    {
+        var narrowItems = items
+            .Where(item => IsVerticalColumnCandidate(item.Bounds))
+            .OrderByDescending(item => item.Bounds.Left)
+            .ThenBy(item => item.Bounds.Top)
+            .ToList();
+        if (narrowItems.Count < 3)
+        {
+            return Array.Empty<List<TextRecognitionItem>>();
+        }
+
+        var columns = BuildTextColumns(narrowItems);
+        return columns
+            .Select(column => column
+                .OrderBy(item => item.Bounds.Top)
+                .ToList())
+            .Where(column => LooksLikeVerticalColumnGroup(column, profile))
+            .ToList();
+    }
+
+    private static bool IsVerticalColumnCandidate(SKRectI bounds)
+    {
+        return bounds.Width <= 96 &&
+               bounds.Height <= 180 &&
+               bounds.Width <= bounds.Height * 1.45;
+    }
+
+    private static bool LooksLikeVerticalColumnGroup(
+        IReadOnlyList<TextRecognitionItem> column,
+        OcrInferenceProfile profile)
+    {
+        if (column.Count < 3)
+        {
+            return false;
+        }
+
+        var bounds = column
+            .Select(item => item.Bounds)
+            .Aggregate(SKRectI.Union);
+        if (bounds.Height < Math.Max(48, bounds.Width * 1.7) ||
+            bounds.Height > profile.MaximumGroupedVerticalHeight)
+        {
+            return false;
+        }
+
+        var medianWidth = ResolveMedianWidth(column);
+        var maxGap = Math.Clamp((int)Math.Round(medianWidth * 4.0), 22, 96);
+        for (var i = 1; i < column.Count; i++)
+        {
+            var gap = column[i].Bounds.Top - column[i - 1].Bounds.Bottom;
+            if (gap > maxGap)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static TextRecognitionItem MergeVerticalCandidateGroup(IReadOnlyList<TextRecognitionItem> column)
+    {
+        var bounds = column
+            .Select(item => item.Bounds)
+            .Aggregate(SKRectI.Union);
+        return new TextRecognitionItem(
+            bounds,
+            TextOrientation.Vertical,
+            column.Min(item => item.DetectionScore));
+    }
+
+    private static IReadOnlyList<TextRecognitionItem> GroupVerticalTextColumns(
+        IReadOnlyList<TextRecognitionItem> items,
+        OcrInferenceProfile profile)
+    {
+        var ordered = items
+            .OrderByDescending(item => item.Bounds.Left)
+            .ThenBy(item => item.Bounds.Top)
+            .ToList();
+        if (ordered.Count <= 1)
+        {
+            return ordered;
+        }
+
+        var columns = BuildTextColumns(ordered);
+        var grouped = new List<TextRecognitionItem>();
+        foreach (var column in columns)
+        {
+            grouped.AddRange(GroupTextColumn(column, profile));
+        }
+
+        return grouped;
+    }
+
+    private static IReadOnlyList<List<TextRecognitionItem>> BuildTextColumns(IReadOnlyList<TextRecognitionItem> items)
+    {
+        var columns = new List<List<TextRecognitionItem>>();
+        foreach (var item in items)
+        {
+            var column = columns.FirstOrDefault(existing => BelongsToTextColumn(existing, item.Bounds));
+            if (column == null)
+            {
+                columns.Add(new List<TextRecognitionItem> { item });
+                continue;
+            }
+
+            column.Add(item);
+        }
+
+        return columns
+            .Select(column => column.OrderBy(item => item.Bounds.Top).ToList())
+            .OrderByDescending(column => column.Max(item => item.Bounds.Right))
+            .ToList();
+    }
+
+    private static bool BelongsToTextColumn(IReadOnlyList<TextRecognitionItem> column, SKRectI bounds)
+    {
+        var columnBounds = column
+            .Select(item => item.Bounds)
+            .Aggregate(SKRectI.Union);
+        return AreSameTextColumn(columnBounds, bounds);
+    }
+
+    private static IReadOnlyList<TextRecognitionItem> GroupTextColumn(
+        IReadOnlyList<TextRecognitionItem> column,
+        OcrInferenceProfile profile)
+    {
+        if (column.Count <= 1)
+        {
+            return column;
+        }
+
+        var grouped = new List<TextRecognitionItem>();
+        var current = column[0];
+        var medianWidth = ResolveMedianWidth(column);
+
+        for (var i = 1; i < column.Count; i++)
+        {
+            var next = column[i];
+            if (ShouldExtendTextColumnChunk(current, next, medianWidth, profile))
+            {
+                current = MergeTextItems(current, next, TextOrientation.Vertical);
+                continue;
+            }
+
+            grouped.Add(current);
+            current = next;
+        }
+
+        grouped.Add(current);
+        return grouped;
+    }
+
+    private static bool ShouldExtendTextColumnChunk(
+        TextRecognitionItem current,
+        TextRecognitionItem next,
+        int medianWidth,
+        OcrInferenceProfile profile)
+    {
+        if (!AreSameTextColumn(current.Bounds, next.Bounds))
+        {
+            return false;
+        }
+
+        var merged = SKRectI.Union(current.Bounds, next.Bounds);
+        if (merged.Height > profile.MaximumGroupedVerticalHeight)
+        {
+            return false;
+        }
+
+        if (LooksLikeMultiColumnBlock(current.Bounds, medianWidth) ||
+            LooksLikeMultiColumnBlock(next.Bounds, medianWidth))
+        {
+            return false;
+        }
+
+        var gap = next.Bounds.Top - current.Bounds.Bottom;
+        if (gap < -Math.Min(current.Bounds.Height, next.Bounds.Height) / 5)
+        {
+            return false;
+        }
+
+        var maxGap = Math.Clamp((int)Math.Round(medianWidth * 4.5), 28, 140);
+        return gap <= maxGap;
+    }
+
+    private static IReadOnlyList<List<TextRecognitionItem>> BuildTextRows(IReadOnlyList<TextRecognitionItem> items)
+    {
+        var rows = new List<List<TextRecognitionItem>>();
+        foreach (var item in items)
+        {
+            var row = rows.FirstOrDefault(existing => BelongsToTextRow(existing, item.Bounds));
+            if (row == null)
+            {
+                rows.Add(new List<TextRecognitionItem> { item });
+                continue;
+            }
+
+            row.Add(item);
+        }
+
+        return rows
+            .Select(row => row.OrderBy(item => item.Bounds.Left).ToList())
+            .OrderBy(row => row.Min(item => item.Bounds.Top))
+            .ToList();
+    }
+
+    private static bool BelongsToTextRow(IReadOnlyList<TextRecognitionItem> row, SKRectI bounds)
+    {
+        var rowBounds = row
+            .Select(item => item.Bounds)
+            .Aggregate(SKRectI.Union);
+        return AreSameTextRow(rowBounds, bounds);
+    }
+
+    private static IReadOnlyList<TextRecognitionItem> GroupTextRow(
+        IReadOnlyList<TextRecognitionItem> row,
+        OcrInferenceProfile profile)
+    {
+        if (row.Count <= 1)
+        {
+            return row;
+        }
+
+        var grouped = new List<TextRecognitionItem>();
+        var current = row[0];
+        var medianHeight = ResolveMedianHeight(row);
+
+        for (var i = 1; i < row.Count; i++)
+        {
+            var next = row[i];
+            if (ShouldExtendTextLineChunk(current, next, medianHeight, profile))
+            {
+                current = MergeTextItems(current, next, TextOrientation.Horizontal);
+                continue;
+            }
+
+            grouped.Add(current);
+            current = next;
+        }
+
+        grouped.Add(current);
+        return grouped;
+    }
+
+    private static bool ShouldExtendTextLineChunk(
+        TextRecognitionItem current,
+        TextRecognitionItem next,
+        int medianHeight,
+        OcrInferenceProfile profile)
+    {
+        if (!AreSameTextRow(current.Bounds, next.Bounds))
+        {
+            return false;
+        }
+
+        var merged = SKRectI.Union(current.Bounds, next.Bounds);
+        if (merged.Width > profile.MaximumGroupedLineWidth)
+        {
+            return false;
+        }
+
+        if (LooksLikeMultiLineBlock(current.Bounds, medianHeight) ||
+            LooksLikeMultiLineBlock(next.Bounds, medianHeight))
+        {
+            return false;
+        }
+
+        var gap = next.Bounds.Left - current.Bounds.Right;
+        if (gap < -Math.Min(current.Bounds.Width, next.Bounds.Width) / 5)
+        {
+            return false;
+        }
+
+        var maxGap = Math.Clamp((int)Math.Round(medianHeight * 2.2), 18, 72);
+        return gap <= maxGap;
+    }
+
+    private static bool AreSameTextRow(SKRectI left, SKRectI right)
+    {
+        var intersectionTop = Math.Max(left.Top, right.Top);
+        var intersectionBottom = Math.Min(left.Bottom, right.Bottom);
+        var overlap = Math.Max(0, intersectionBottom - intersectionTop) /
+                      (double)Math.Max(1, Math.Min(left.Height, right.Height));
+        var centerDelta = Math.Abs((left.Top + left.Bottom) / 2.0 - (right.Top + right.Bottom) / 2.0);
+        return overlap >= 0.76 &&
+               centerDelta <= Math.Max(left.Height, right.Height) * 0.22;
+    }
+
+    private static bool AreSameTextColumn(SKRectI top, SKRectI bottom)
+    {
+        var intersectionLeft = Math.Max(top.Left, bottom.Left);
+        var intersectionRight = Math.Min(top.Right, bottom.Right);
+        var overlap = Math.Max(0, intersectionRight - intersectionLeft) /
+                      (double)Math.Max(1, Math.Min(top.Width, bottom.Width));
+        var centerDelta = Math.Abs((top.Left + top.Right) / 2.0 - (bottom.Left + bottom.Right) / 2.0);
+        return overlap >= 0.62 &&
+               centerDelta <= Math.Max(top.Width, bottom.Width) * 0.35;
+    }
+
+    private static int ResolveMedianHeight(IReadOnlyList<TextRecognitionItem> row)
+    {
+        var heights = row
+            .Select(item => item.Bounds.Height)
+            .Order()
+            .ToList();
+        return heights.Count == 0 ? 1 : Math.Max(1, heights[heights.Count / 2]);
+    }
+
+    private static int ResolveMedianWidth(IReadOnlyList<TextRecognitionItem> column)
+    {
+        var widths = column
+            .Select(item => item.Bounds.Width)
+            .Order()
+            .ToList();
+        return widths.Count == 0 ? 1 : Math.Max(1, widths[widths.Count / 2]);
+    }
+
+    private static bool LooksLikeMultiLineBlock(SKRectI bounds, int medianHeight)
+    {
+        return bounds.Height >= Math.Max(72, medianHeight * 2.8);
+    }
+
+    private static bool LooksLikeMultiColumnBlock(SKRectI bounds, int medianWidth)
+    {
+        return bounds.Width >= Math.Max(72, medianWidth * 2.8);
+    }
+
+    private static TextRecognitionItem MergeTextItems(
+        TextRecognitionItem left,
+        TextRecognitionItem right,
+        TextOrientation orientation)
+    {
+        return new TextRecognitionItem(
+            SKRectI.Union(left.Bounds, right.Bounds),
+            orientation,
+            Math.Min(left.DetectionScore, right.DetectionScore));
+    }
+
+    private static RecognitionContext CreateRecognitionContext(InferenceSession session)
+    {
+        return new RecognitionContext(
+            session,
+            session.InputMetadata.Keys.First(),
+            ResolveRecognitionInputHeight(session));
+    }
+
     private static (string Text, float Confidence) RecognizeText(
-        InferenceSession session,
+        RecognitionContext context,
         SKBitmap crop,
         IReadOnlyList<string> dictionary,
         OcrInferenceProfile profile,
         TextOrientation orientation)
     {
         return orientation == TextOrientation.Vertical
-            ? RecognizeVerticalText(session, crop, dictionary, profile)
-            : RecognizeHorizontalText(session, crop, dictionary, profile);
+            ? RecognizeVerticalText(context, crop, dictionary, profile)
+            : RecognizeHorizontalText(context, crop, dictionary, profile);
     }
 
     private static (string Text, float Confidence) RecognizeHorizontalText(
-        InferenceSession session,
+        RecognitionContext context,
         SKBitmap crop,
         IReadOnlyList<string> dictionary,
         OcrInferenceProfile profile)
     {
-        var original = RecognizeTextVariant(session, crop, dictionary, profile.MaxRecognitionWidth);
+        var original = RecognizeTextVariant(context, crop, dictionary, profile.MaxRecognitionWidth);
+        if (!ShouldRunRecognitionRetries(crop, original, profile))
+        {
+            return original;
+        }
+
+        return RetryHorizontalRecognition(context, crop, dictionary, profile, original);
+    }
+
+    private static (string Text, float Confidence) RetryHorizontalRecognition(
+        RecognitionContext context,
+        SKBitmap crop,
+        IReadOnlyList<string> dictionary,
+        OcrInferenceProfile profile,
+        (string Text, float Confidence) original)
+    {
         using var colorSeparated = TryCreateColorSeparatedBitmap(crop);
         if (colorSeparated == null)
         {
             return original;
         }
 
-        var separated = RecognizeTextVariant(session, colorSeparated, dictionary, profile.MaxRecognitionWidth);
+        var separated = RecognizeTextVariant(context, colorSeparated, dictionary, profile.MaxRecognitionWidth);
         var best = IsBetterColorSeparatedRecognition(separated, original) ? separated : original;
         if (best.Confidence >= profile.LowConfidenceRetryThreshold)
         {
@@ -339,33 +896,60 @@ public sealed class PaddleOnnxOcrRunner
             return best;
         }
 
-        var sharpenedResult = RecognizeTextVariant(session, sharpened, dictionary, profile.MaxRecognitionWidth);
+        var sharpenedResult = RecognizeTextVariant(context, sharpened, dictionary, profile.MaxRecognitionWidth);
         return IsBetterFontRetryRecognition(sharpenedResult, best) ? sharpenedResult : best;
     }
 
     private static (string Text, float Confidence) RecognizeVerticalText(
-        InferenceSession session,
+        RecognitionContext context,
         SKBitmap crop,
         IReadOnlyList<string> dictionary,
         OcrInferenceProfile profile)
     {
-        var best = RecognizeHorizontalText(session, crop, dictionary, profile);
+        var original = RecognizeTextVariant(context, crop, dictionary, profile.MaxRecognitionWidth);
 
         using var counterClockwise = RotateBitmapCounterClockwise(crop);
-        var counterClockwiseResult = RecognizeHorizontalText(session, counterClockwise, dictionary, profile);
-        if (IsBetterVerticalRecognition(counterClockwiseResult, best))
+        var counterClockwiseResult = RecognizeTextVariant(context, counterClockwise, dictionary, profile.MaxRecognitionWidth);
+        var preferCounterClockwise = IsBetterVerticalRecognition(counterClockwiseResult, original);
+        var best = preferCounterClockwise
+            ? counterClockwiseResult
+            : original;
+        var bestOrientation = preferCounterClockwise
+            ? VerticalRecognitionOrientation.CounterClockwise
+            : VerticalRecognitionOrientation.Original;
+
+        if (IsConfidentRecognition(best, profile))
         {
-            best = counterClockwiseResult;
+            return best;
         }
 
         using var clockwise = RotateBitmapClockwise(crop);
-        var clockwiseResult = RecognizeHorizontalText(session, clockwise, dictionary, profile);
+        var clockwiseResult = RecognizeTextVariant(context, clockwise, dictionary, profile.MaxRecognitionWidth);
+        if (IsBetterVerticalRecognition(counterClockwiseResult, best))
+        {
+            best = counterClockwiseResult;
+            bestOrientation = VerticalRecognitionOrientation.CounterClockwise;
+        }
+
         if (IsBetterVerticalRecognition(clockwiseResult, best))
         {
             best = clockwiseResult;
+            bestOrientation = VerticalRecognitionOrientation.Clockwise;
         }
 
-        return best;
+        if (!profile.EnableRecognitionRetries || IsConfidentRecognition(best, profile))
+        {
+            return best;
+        }
+
+        var retry = bestOrientation switch
+        {
+            VerticalRecognitionOrientation.CounterClockwise => RecognizeHorizontalText(context, counterClockwise, dictionary, profile),
+            VerticalRecognitionOrientation.Clockwise => RecognizeHorizontalText(context, clockwise, dictionary, profile),
+            _ => RecognizeHorizontalText(context, crop, dictionary, profile)
+        };
+
+        return IsBetterVerticalRecognition(retry, best) ? retry : best;
     }
 
     private static IReadOnlyList<TextBounds> SplitIntoTextBounds(
@@ -734,13 +1318,12 @@ public sealed class PaddleOnnxOcrRunner
     }
 
     private static (string Text, float Confidence) RecognizeTextVariant(
-        InferenceSession session,
+        RecognitionContext context,
         SKBitmap crop,
         IReadOnlyList<string> dictionary,
         int maxRecognitionWidth)
     {
-        var inputName = session.InputMetadata.Keys.First();
-        var inputHeight = ResolveRecognitionInputHeight(session);
+        var inputHeight = context.InputHeight;
         var width = Math.Clamp(
             (int)Math.Ceiling(crop.Width * ((double)inputHeight / Math.Max(1, crop.Height))),
             inputHeight,
@@ -752,9 +1335,9 @@ public sealed class PaddleOnnxOcrRunner
             SKFilterQuality.Medium);
         var inputBitmap = resized ?? crop;
         var tensor = CreateImageTensor(inputBitmap, inputHeight, width, RecognitionMean, RecognitionStd);
-        var input = NamedOnnxValue.CreateFromTensor(inputName, tensor);
+        var input = NamedOnnxValue.CreateFromTensor(context.InputName, tensor);
 
-        using var outputs = session.Run(new[] { input });
+        using var outputs = context.Session.Run(new[] { input });
         var output = outputs.First().AsTensor<float>();
         return DecodeCtc(output, dictionary);
     }
@@ -852,6 +1435,61 @@ public sealed class PaddleOnnxOcrRunner
                candidateQuality >= currentQuality - 0.03 &&
                candidate.Text.Count(char.IsLetterOrDigit) >= current.Text.Count(char.IsLetterOrDigit) &&
                candidate.Confidence >= current.Confidence * 0.92f;
+    }
+
+    private static bool ShouldRunRecognitionRetries(
+        SKBitmap crop,
+        (string Text, float Confidence) original,
+        OcrInferenceProfile profile)
+    {
+        if (!profile.EnableRecognitionRetries)
+        {
+            return false;
+        }
+
+        if (!IsConfidentRecognition(original, profile))
+        {
+            return true;
+        }
+
+        return HasLikelyColoredText(crop);
+    }
+
+    private static bool IsConfidentRecognition((string Text, float Confidence) result, OcrInferenceProfile profile)
+    {
+        if (string.IsNullOrWhiteSpace(result.Text))
+        {
+            return false;
+        }
+
+        return result.Confidence >= profile.LowConfidenceRetryThreshold &&
+               TextQuality(result.Text) >= 0.78;
+    }
+
+    private static bool HasLikelyColoredText(SKBitmap crop)
+    {
+        var stepX = Math.Max(1, crop.Width / 48);
+        var stepY = Math.Max(1, crop.Height / 16);
+        var chromaPixels = 0;
+        var sampledPixels = 0;
+
+        for (var y = 0; y < crop.Height; y += stepY)
+        {
+            for (var x = 0; x < crop.Width; x += stepX)
+            {
+                var color = crop.GetPixel(x, y);
+                var max = Math.Max(color.Red, Math.Max(color.Green, color.Blue));
+                var min = Math.Min(color.Red, Math.Min(color.Green, color.Blue));
+                if (max - min >= 24)
+                {
+                    chromaPixels++;
+                }
+
+                sampledPixels++;
+            }
+        }
+
+        return sampledPixels > 0 && chromaPixels / (double)sampledPixels >= 0.08;
     }
 
     private static bool IsBetterVerticalRecognition(
@@ -989,6 +1627,15 @@ public sealed class PaddleOnnxOcrRunner
             return (string.Empty, 0);
         }
 
+        return DecodeCtcSequence(output, dictionary, batchIndex: 0);
+    }
+
+    private static (string Text, float Confidence) DecodeCtcSequence(
+        Tensor<float> output,
+        IReadOnlyList<string> dictionary,
+        int batchIndex)
+    {
+        var dimensions = output.Dimensions.ToArray();
         var sequenceLength = dimensions[1];
         var classCount = dimensions[2];
         var previousClass = -1;
@@ -1003,7 +1650,7 @@ public sealed class PaddleOnnxOcrRunner
 
             for (var cls = 0; cls < classCount; cls++)
             {
-                var value = output[0, step, cls];
+                var value = output[batchIndex, step, cls];
                 if (value > bestLogit)
                 {
                     bestLogit = value;
@@ -1399,9 +2046,25 @@ public sealed class PaddleOnnxOcrRunner
 
     private static IReadOnlyList<string> LoadDictionary(string path)
     {
-        return File.ReadAllLines(path)
-            .Select(line => line.TrimEnd('\r', '\n'))
-            .ToList();
+        var lastWriteTimeUtc = File.GetLastWriteTimeUtc(path);
+        var cached = DictionaryCache.GetOrAdd(path, Create);
+        if (cached.LastWriteTimeUtc == lastWriteTimeUtc)
+        {
+            return cached.Tokens;
+        }
+
+        var refreshed = Create(path);
+        DictionaryCache[path] = refreshed;
+        return refreshed.Tokens;
+
+        CachedDictionary Create(string dictionaryPath)
+        {
+            return new CachedDictionary(
+                File.GetLastWriteTimeUtc(dictionaryPath),
+                File.ReadAllLines(dictionaryPath)
+                    .Select(line => line.TrimEnd('\r', '\n'))
+                    .ToList());
+        }
     }
 
     private static int RoundUp(int value, int multiple)
@@ -1418,15 +2081,71 @@ public sealed class PaddleOnnxOcrRunner
         int CropPadding,
         int VerticalCropPadding,
         int MaxRecognitionWidth,
-        float LowConfidenceRetryThreshold);
+        float LowConfidenceRetryThreshold,
+        bool AlwaysRunContrastDetectionPass,
+        bool EnableRecognitionRetries,
+        int MaximumGroupedLineWidth,
+        int MaximumGroupedVerticalHeight);
 
     private sealed record DetectedTextBox(SKRectI Bounds, float Score);
 
     private sealed record TextBounds(SKRectI Bounds, TextOrientation Orientation);
 
+    private sealed record TextRecognitionItem(SKRectI Bounds, TextOrientation Orientation, float DetectionScore);
+
+    private sealed record RecognitionContext(InferenceSession Session, string InputName, int InputHeight);
+
+    private sealed record CachedDictionary(DateTime LastWriteTimeUtc, IReadOnlyList<string> Tokens);
+
+    private sealed class OcrInferenceTiming
+    {
+        public TimeSpan Decode { get; set; }
+
+        public TimeSpan DetectionSessionLoad { get; set; }
+
+        public TimeSpan DetectionRunAndDispose { get; set; }
+
+        public TimeSpan FirstTrim { get; set; }
+
+        public TimeSpan DictionaryLoad { get; set; }
+
+        public TimeSpan RecognitionSessionLoad { get; set; }
+
+        public TimeSpan Split { get; set; }
+
+        public TimeSpan Crop { get; set; }
+
+        public TimeSpan Recognition { get; set; }
+
+        public TimeSpan RecognitionLoopAndDispose { get; set; }
+
+        public TimeSpan SecondTrim { get; set; }
+
+        public TimeSpan ResultOrdering { get; set; }
+
+        public int DetectedBoxes { get; set; }
+
+        public int TextCandidates { get; set; }
+
+        public int GroupedTextCandidates { get; set; }
+
+        public int RecognitionCalls { get; set; }
+
+        public int OutputRegions { get; set; }
+
+        public string? RecognitionAccelerator { get; set; }
+    }
+
     private enum TextOrientation
     {
         Horizontal,
         Vertical
+    }
+
+    private enum VerticalRecognitionOrientation
+    {
+        Original,
+        CounterClockwise,
+        Clockwise
     }
 }

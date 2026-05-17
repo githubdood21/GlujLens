@@ -7,7 +7,8 @@ public sealed class OnnxRuntimeSessionFactory
     public OnnxSessionBundle LoadSessions(
         IReadOnlyList<string> modelPaths,
         string? accelerator,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool optimizeForLowMemory = false)
     {
         if (modelPaths.Count == 0)
         {
@@ -23,7 +24,7 @@ public sealed class OnnxRuntimeSessionFactory
             foreach (var modelPath in modelPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                sessions.Add(LoadSession(modelPath, requestedAccelerator));
+                sessions.Add(LoadSession(modelPath, requestedAccelerator, optimizeForLowMemory));
             }
         }
         catch when (string.Equals(requestedAccelerator, "Auto", StringComparison.OrdinalIgnoreCase) ||
@@ -40,16 +41,16 @@ public sealed class OnnxRuntimeSessionFactory
             foreach (var modelPath in modelPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                sessions.Add(LoadSession(modelPath, "CPU"));
+                sessions.Add(LoadSession(modelPath, "CPU", optimizeForLowMemory));
             }
         }
 
         return new OnnxSessionBundle(sessions, activeAccelerator);
     }
 
-    private static OnnxLoadedSession LoadSession(string modelPath, string accelerator)
+    private static OnnxLoadedSession LoadSession(string modelPath, string accelerator, bool optimizeForLowMemory)
     {
-        var options = CreateSessionOptions(accelerator);
+        var options = CreateSessionOptions(accelerator, optimizeForLowMemory);
         try
         {
             var session = new InferenceSession(modelPath, options);
@@ -62,13 +63,19 @@ public sealed class OnnxRuntimeSessionFactory
         }
     }
 
-    private static SessionOptions CreateSessionOptions(string accelerator)
+    private static SessionOptions CreateSessionOptions(string accelerator, bool optimizeForLowMemory)
     {
         var options = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR
         };
+
+        if (optimizeForLowMemory)
+        {
+            options.EnableMemoryPattern = false;
+            options.EnableCpuMemArena = false;
+        }
 
         if (string.Equals(accelerator, "DirectML", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(accelerator, "Auto", StringComparison.OrdinalIgnoreCase))
@@ -77,8 +84,25 @@ public sealed class OnnxRuntimeSessionFactory
             options.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
             options.AppendExecutionProvider_DML(0);
         }
+        else
+        {
+            ConfigureCpuParallelism(options);
+        }
 
         return options;
+    }
+
+    private static void ConfigureCpuParallelism(SessionOptions options)
+    {
+        var processorCount = Environment.ProcessorCount;
+        if (processorCount <= 1)
+        {
+            return;
+        }
+
+        options.ExecutionMode = ExecutionMode.ORT_PARALLEL;
+        options.IntraOpNumThreads = Math.Clamp(processorCount - 1, 1, 8);
+        options.InterOpNumThreads = Math.Clamp(processorCount / 2, 1, 4);
     }
 
     private static string NormalizeAccelerator(string? accelerator)

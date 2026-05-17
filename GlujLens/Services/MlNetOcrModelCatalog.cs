@@ -121,37 +121,53 @@ public sealed class MlNetOcrModelCatalog
 
     private static PaddleOnnxOcrModel? TryCreateFlatPaddleOcrModel(string root)
     {
-        var detectionModel = FindPreferredFile(root, new[]
+        foreach (var variantRoot in EnumerateFlatModelVariantRoots(root))
         {
+            var model = TryCreateFlatPaddleOcrModelVariant(root, variantRoot);
+            if (model != null)
+            {
+                return model;
+            }
+        }
+
+        return null;
+    }
+
+    private static PaddleOnnxOcrModel? TryCreateFlatPaddleOcrModelVariant(string root, string variantRoot)
+    {
+        var detectionModel = FindPreferredFile(variantRoot, new[]
+        {
+            "PP-OCRv5_server_det_infer_int8.onnx",
+            "PP-OCRv5_server_det_int8_infer.onnx",
+            "PP-OCRv5_server_det_quantized.onnx",
             "PP-OCRv5_server_det_infer.onnx",
+            "PP-OCRv5_mobile_det_infer_int8.onnx",
+            "PP-OCRv5_mobile_det_int8_infer.onnx",
             "PP-OCRv5_mobile_det_infer.onnx",
             "PP-OCRv4_server_det_infer.onnx",
             "PP-OCRv4_mobile_det_infer.onnx"
         }) ?? Directory
-            .EnumerateFiles(root, "*det*.onnx", SearchOption.TopDirectoryOnly)
+            .EnumerateFiles(variantRoot, "*det*.onnx", SearchOption.TopDirectoryOnly)
             .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
 
-        var recognitionModel = FindPreferredFile(root, new[]
+        var recognitionModel = FindPreferredFile(variantRoot, new[]
         {
+            "PP-OCRv5_server_rec_infer_int8.onnx",
+            "PP-OCRv5_server_rec_int8_infer.onnx",
+            "PP-OCRv5_server_rec_quantized.onnx",
             "PP-OCRv5_server_rec_infer.onnx",
+            "PP-OCRv5_mobile_rec_infer_int8.onnx",
+            "PP-OCRv5_mobile_rec_int8_infer.onnx",
             "PP-OCRv5_mobile_rec_infer.onnx",
             "PP-OCRv4_server_rec_infer.onnx",
             "PP-OCRv4_mobile_rec_infer.onnx"
         }) ?? Directory
-            .EnumerateFiles(root, "*rec*.onnx", SearchOption.TopDirectoryOnly)
+            .EnumerateFiles(variantRoot, "*rec*.onnx", SearchOption.TopDirectoryOnly)
             .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
 
-        var dictionary = FindPreferredFile(root, new[]
-        {
-            "ppocrv5_dict.txt",
-            "dict.txt",
-            "en_dict.txt"
-        }) ?? Directory
-            .EnumerateFiles(root, "*dict*.txt", SearchOption.TopDirectoryOnly)
-            .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
+        var dictionary = FindFlatDictionary(root, variantRoot);
 
         if (string.IsNullOrWhiteSpace(detectionModel) ||
             string.IsNullOrWhiteSpace(recognitionModel) ||
@@ -162,16 +178,64 @@ public sealed class MlNetOcrModelCatalog
 
         return new PaddleOnnxOcrModel
         {
-            RootDirectory = root,
+            RootDirectory = variantRoot,
             DetectionModelPath = detectionModel,
             RecognitionModelPath = recognitionModel,
             TextLineOrientationModelPath = Directory
-                .EnumerateFiles(root, "*textline*ori*.onnx", SearchOption.TopDirectoryOnly)
+                .EnumerateFiles(variantRoot, "*textline*ori*.onnx", SearchOption.TopDirectoryOnly)
                 .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault(),
             DictionaryPath = dictionary,
-            RecognitionLanguage = "ppocrv5"
+            RecognitionLanguage = "ppocrv5",
+            IsQuantized = IsQuantizedModelPath(detectionModel) || IsQuantizedModelPath(recognitionModel) || IsQuantizedModelPath(variantRoot)
         };
+    }
+
+    private static IEnumerable<string> EnumerateFlatModelVariantRoots(string root)
+    {
+        foreach (var variantName in new[] { "int8", "quantized", "quant", "qint8" })
+        {
+            var variantRoot = Path.Combine(root, variantName);
+            if (Directory.Exists(variantRoot))
+            {
+                yield return variantRoot;
+            }
+        }
+
+        yield return root;
+    }
+
+    private static string? FindFlatDictionary(string root, string variantRoot)
+    {
+        var candidateRoots = new[]
+        {
+            variantRoot,
+            root,
+            Directory.GetParent(root)?.FullName ?? root
+        }
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Where(Directory.Exists)
+        .ToList();
+
+        foreach (var candidateRoot in candidateRoots)
+        {
+            var dictionary = FindPreferredFile(candidateRoot, new[]
+            {
+                "ppocrv5_dict.txt",
+                "dict.txt",
+                "en_dict.txt"
+            }) ?? Directory
+                .EnumerateFiles(candidateRoot, "*dict*.txt", SearchOption.TopDirectoryOnly)
+                .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            if (!string.IsNullOrWhiteSpace(dictionary))
+            {
+                return dictionary;
+            }
+        }
+
+        return null;
     }
 
     private static MlNetOcrModelInfo? TryCreateModelDirectoryInfo(string directory)
@@ -252,5 +316,18 @@ public sealed class MlNetOcrModelCatalog
         var extension = Path.GetExtension(path);
         return extension.Equals(".onnx", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsQuantizedModelPath(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.Contains("int8", StringComparison.OrdinalIgnoreCase) ||
+               name.Contains("quant", StringComparison.OrdinalIgnoreCase) ||
+               path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                   .Any(part =>
+                       part.Equals("int8", StringComparison.OrdinalIgnoreCase) ||
+                       part.Equals("quantized", StringComparison.OrdinalIgnoreCase) ||
+                       part.Equals("quant", StringComparison.OrdinalIgnoreCase) ||
+                       part.Equals("qint8", StringComparison.OrdinalIgnoreCase));
     }
 }

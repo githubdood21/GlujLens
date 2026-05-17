@@ -13,4 +13,6 @@ public sealed class PaddleOnnxOcrModel
     public string DictionaryPath { get; init; } = string.Empty;
 
     public string RecognitionLanguage { get; init; } = string.Empty;
+
+    public bool IsQuantized { get; init; }
 }

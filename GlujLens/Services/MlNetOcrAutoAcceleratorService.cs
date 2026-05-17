@@ -70,8 +70,8 @@ public sealed class MlNetOcrAutoAcceleratorService
             }
 
             var modelPaths = new[] { model.DetectionModelPath, model.RecognitionModelPath };
-            var cpu = BenchmarkModelLoad(modelPaths, "CPU", cancellationToken);
-            var directMl = BenchmarkModelLoad(modelPaths, "DirectML", cancellationToken);
+            var cpu = BenchmarkModelLoad(modelPaths, "CPU", optimizeForLowMemory: true, cancellationToken);
+            var directMl = BenchmarkModelLoad(modelPaths, "DirectML", optimizeForLowMemory: true, cancellationToken);
 
             if (!directMl.Success)
             {
@@ -92,12 +92,13 @@ public sealed class MlNetOcrAutoAcceleratorService
     private BenchmarkResult BenchmarkModelLoad(
         IReadOnlyList<string> modelPaths,
         string accelerator,
+        bool optimizeForLowMemory,
         CancellationToken cancellationToken)
     {
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            using var sessions = _sessionFactory.LoadSessions(modelPaths, accelerator, cancellationToken);
+            using var sessions = _sessionFactory.LoadSessions(modelPaths, accelerator, cancellationToken, optimizeForLowMemory);
             stopwatch.Stop();
             return new BenchmarkResult(true, stopwatch.Elapsed, null);
         }
